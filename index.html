@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>게임 완주 계획표</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <div class="title-row">
+          <h1>게임 완주 계획표</h1>
+          <button id="themeToggleButton" class="theme-toggle" type="button" aria-pressed="false">다크모드</button>
+        </div>
+        <p>게임 시간 목록을 생활 리듬에 맞춰 월별 일정으로 계산합니다.</p>
+      </div>
+      <div class="save-state" id="saveState" aria-live="polite">저장됨</div>
+    </header>
+
+    <main class="app-shell">
+      <div class="left-column">
+        <section class="panel">
+          <div class="section-head">
+            <h2>기본 설정</h2>
+          </div>
+          <label class="field">
+            <span>계산 시작일</span>
+            <input id="startDate" type="date">
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2 id="gameFormTitle">게임 추가</h2>
+          </div>
+          <form id="gameForm" class="stack">
+            <div class="game-basic-grid">
+              <label class="field">
+                <span>순서</span>
+                <input id="gameOrder" type="number" min="1" step="1" inputmode="numeric" placeholder="맨 뒤">
+              </label>
+              <label class="field">
+                <span>게임명</span>
+                <input id="gameTitle" type="text" autocomplete="off" required>
+              </label>
+            </div>
+            <label class="field">
+              <span>플랫폼</span>
+              <input id="gamePlatform" type="text" placeholder="PC">
+            </label>
+            <div class="completion-time-grid">
+              <fieldset class="duration-field">
+                <legend>Main story</legend>
+                <div class="time-grid">
+                  <label class="field">
+                    <span>시간</span>
+                    <input id="gameMainStoryHours" type="number" min="0" step="1" inputmode="numeric" required>
+                  </label>
+                  <label class="field">
+                    <span>분</span>
+                    <input id="gameMainStoryMinutes" type="number" min="0" max="59" step="1" inputmode="numeric">
+                  </label>
+                </div>
+              </fieldset>
+              <fieldset class="duration-field">
+                <legend>Main + extra</legend>
+                <div class="time-grid">
+                  <label class="field">
+                    <span>시간</span>
+                    <input id="gameMainExtraHours" type="number" min="0" step="1" inputmode="numeric" required>
+                  </label>
+                  <label class="field">
+                    <span>분</span>
+                    <input id="gameMainExtraMinutes" type="number" min="0" max="59" step="1" inputmode="numeric">
+                  </label>
+                </div>
+              </fieldset>
+              <fieldset class="duration-field">
+                <legend>Completionist</legend>
+                <div class="time-grid">
+                  <label class="field">
+                    <span>시간</span>
+                    <input id="gameCompletionistHours" type="number" min="0" step="1" inputmode="numeric" required>
+                  </label>
+                  <label class="field">
+                    <span>분</span>
+                    <input id="gameCompletionistMinutes" type="number" min="0" max="59" step="1" inputmode="numeric">
+                  </label>
+                </div>
+              </fieldset>
+            </div>
+            <label class="field">
+              <span>메모</span>
+              <textarea id="gameNote" rows="3" placeholder="DLC 포함, 친구랑 할 것, 나중에 확인"></textarea>
+            </label>
+            <div class="button-row">
+              <button id="saveGameButton" class="primary-button" type="submit">추가</button>
+              <button id="cancelGameEditButton" class="ghost-button" type="button" hidden>취소</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>텍스트 가져오기</h2>
+          </div>
+          <textarea id="bulkText" class="bulk-input" rows="8" spellcheck="false" placeholder="Limbo&#9;Steam&#9;3시간 34분&#9;4시간 10분&#9;6시간 44분&#10;Enter the Gungeon&#9;Epic&#9;22시간 27분&#9;61시간 51분&#9;160시간 2분"></textarea>
+          <div class="button-row panel-buttons">
+            <button id="parseTextButton" class="secondary-button" type="button">미리보기</button>
+            <button id="importTextButton" class="primary-button" type="button" disabled>가져오기</button>
+          </div>
+          <div id="importPreview" class="preview-box" aria-live="polite"></div>
+        </section>
+
+        <section class="panel feature-panel">
+          <div class="section-head">
+            <h2 id="ruleFormTitle">플레이 시간 규칙</h2>
+          </div>
+          <form id="ruleForm" class="stack">
+            <div class="date-grid">
+              <label class="field">
+                <span>시작일</span>
+                <input id="ruleFrom" type="date" required>
+              </label>
+              <label class="field">
+                <span>종료일</span>
+                <input id="ruleTo" type="date">
+              </label>
+            </div>
+            <div class="rule-grid">
+              <label class="field">
+                <span>방식</span>
+                <select id="ruleType">
+                  <option value="daily">매일</option>
+                  <option value="weekly">매주</option>
+                </select>
+              </label>
+              <div class="time-grid">
+                <label class="field">
+                  <span>시간</span>
+                  <input id="ruleHours" type="number" min="0" step="1" inputmode="numeric" required>
+                </label>
+                <label class="field">
+                  <span>분</span>
+                  <input id="ruleMinutes" type="number" min="0" max="59" step="1" inputmode="numeric">
+                </label>
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="saveRuleButton" class="primary-button" type="submit">규칙 추가</button>
+              <button id="cancelRuleEditButton" class="ghost-button" type="button" hidden>취소</button>
+            </div>
+          </form>
+          <div id="ruleList" class="rule-list"></div>
+        </section>
+
+        <section class="panel blocked-panel">
+          <div class="section-head">
+            <h2 id="blockedPeriodFormTitle">플레이 불가 기간</h2>
+          </div>
+          <form id="blockedPeriodForm" class="stack">
+            <div class="date-grid">
+              <label class="field">
+                <span>시작일</span>
+                <input id="blockedFrom" type="date" required>
+              </label>
+              <label class="field">
+                <span>종료일</span>
+                <input id="blockedTo" type="date" required>
+              </label>
+            </div>
+            <label class="field">
+              <span>메모</span>
+              <textarea id="blockedNote" rows="2" placeholder="여행, 시험기간, 바쁜 기간"></textarea>
+            </label>
+            <div class="button-row">
+              <button id="saveBlockedPeriodButton" class="primary-button" type="submit">기간 추가</button>
+              <button id="cancelBlockedPeriodEditButton" class="ghost-button" type="button" hidden>취소</button>
+            </div>
+          </form>
+          <div id="blockedPeriodList" class="rule-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>백업</h2>
+          </div>
+          <div class="backup-grid">
+            <button id="exportJsonButton" class="secondary-button" type="button">JSON 내보내기</button>
+            <label class="file-button">
+              JSON 가져오기
+              <input id="importJsonInput" type="file" accept="application/json,.json">
+            </label>
+            <button id="exportCsvButton" class="secondary-button" type="button">CSV 내보내기</button>
+            <label class="file-button">
+              CSV 가져오기
+              <input id="importCsvInput" type="file" accept="text/csv,.csv">
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div class="right-column">
+        <section class="summary-band" aria-label="요약">
+          <div class="metric">
+            <span>게임</span>
+            <strong id="gameCount">0개</strong>
+          </div>
+          <div class="metric">
+            <span>총 시간</span>
+            <strong id="totalTime">0h</strong>
+          </div>
+          <div class="metric">
+            <span>완료 예상일</span>
+            <strong id="finishDate">-</strong>
+          </div>
+          <div class="metric">
+            <span>총 기간</span>
+            <strong id="totalPeriod">-</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>게임 목록</h2>
+            <button id="clearGamesButton" class="danger-button" type="button">전체 삭제</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>순서</th>
+                  <th>게임</th>
+                  <th>시간</th>
+                  <th>일정</th>
+                  <th class="action-col">관리</th>
+                </tr>
+              </thead>
+              <tbody id="gamesTableBody"></tbody>
+            </table>
+          </div>
+          <div id="emptyGames" class="empty-state">게임을 추가하면 일정이 계산됩니다.</div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>월별 일정</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>월</th>
+                  <th>진행</th>
+                  <th>개별 플레이시간</th>
+                  <th>총 플레이시간</th>
+                </tr>
+              </thead>
+              <tbody id="monthsTableBody"></tbody>
+            </table>
+          </div>
+          <div id="emptyMonths" class="empty-state">계산할 월별 일정이 없습니다.</div>
+        </section>
+      </div>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

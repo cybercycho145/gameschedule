@@ -1,0 +1,1425 @@
+const STORAGE_KEY = "game-backlog-planner:v2";
+const MAX_SIMULATION_DAYS = 365 * 200;
+const DEFAULT_TIME_MODE = "mainExtra";
+const TIME_MODES = [
+  { key: "mainStory", shortLabel: "M", label: "Main story" },
+  { key: "mainExtra", shortLabel: "ME", label: "Main + extra" },
+  { key: "completionist", shortLabel: "C", label: "Completionist" }
+];
+
+const elements = {
+  saveState: document.querySelector("#saveState"),
+  themeToggleButton: document.querySelector("#themeToggleButton"),
+  startDate: document.querySelector("#startDate"),
+  gameForm: document.querySelector("#gameForm"),
+  gameFormTitle: document.querySelector("#gameFormTitle"),
+  gameOrder: document.querySelector("#gameOrder"),
+  gameTitle: document.querySelector("#gameTitle"),
+  gamePlatform: document.querySelector("#gamePlatform"),
+  gameNote: document.querySelector("#gameNote"),
+  gameMainStoryHours: document.querySelector("#gameMainStoryHours"),
+  gameMainStoryMinutes: document.querySelector("#gameMainStoryMinutes"),
+  gameMainExtraHours: document.querySelector("#gameMainExtraHours"),
+  gameMainExtraMinutes: document.querySelector("#gameMainExtraMinutes"),
+  gameCompletionistHours: document.querySelector("#gameCompletionistHours"),
+  gameCompletionistMinutes: document.querySelector("#gameCompletionistMinutes"),
+  saveGameButton: document.querySelector("#saveGameButton"),
+  cancelGameEditButton: document.querySelector("#cancelGameEditButton"),
+  bulkText: document.querySelector("#bulkText"),
+  parseTextButton: document.querySelector("#parseTextButton"),
+  importTextButton: document.querySelector("#importTextButton"),
+  importPreview: document.querySelector("#importPreview"),
+  ruleForm: document.querySelector("#ruleForm"),
+  ruleFormTitle: document.querySelector("#ruleFormTitle"),
+  ruleFrom: document.querySelector("#ruleFrom"),
+  ruleTo: document.querySelector("#ruleTo"),
+  ruleType: document.querySelector("#ruleType"),
+  ruleHours: document.querySelector("#ruleHours"),
+  ruleMinutes: document.querySelector("#ruleMinutes"),
+  saveRuleButton: document.querySelector("#saveRuleButton"),
+  cancelRuleEditButton: document.querySelector("#cancelRuleEditButton"),
+  ruleList: document.querySelector("#ruleList"),
+  blockedPeriodForm: document.querySelector("#blockedPeriodForm"),
+  blockedPeriodFormTitle: document.querySelector("#blockedPeriodFormTitle"),
+  blockedFrom: document.querySelector("#blockedFrom"),
+  blockedTo: document.querySelector("#blockedTo"),
+  blockedNote: document.querySelector("#blockedNote"),
+  saveBlockedPeriodButton: document.querySelector("#saveBlockedPeriodButton"),
+  cancelBlockedPeriodEditButton: document.querySelector("#cancelBlockedPeriodEditButton"),
+  blockedPeriodList: document.querySelector("#blockedPeriodList"),
+  exportJsonButton: document.querySelector("#exportJsonButton"),
+  importJsonInput: document.querySelector("#importJsonInput"),
+  exportCsvButton: document.querySelector("#exportCsvButton"),
+  importCsvInput: document.querySelector("#importCsvInput"),
+  gameCount: document.querySelector("#gameCount"),
+  totalTime: document.querySelector("#totalTime"),
+  finishDate: document.querySelector("#finishDate"),
+  totalPeriod: document.querySelector("#totalPeriod"),
+  clearGamesButton: document.querySelector("#clearGamesButton"),
+  gamesTableBody: document.querySelector("#gamesTableBody"),
+  monthsTableBody: document.querySelector("#monthsTableBody"),
+  emptyGames: document.querySelector("#emptyGames"),
+  emptyMonths: document.querySelector("#emptyMonths")
+};
+
+let state = loadState();
+let editingGameId = null;
+let editingRuleId = null;
+let editingBlockedPeriodId = null;
+let parsedBulkGames = [];
+
+initialize();
+
+function initialize() {
+  applyTheme();
+  bindEvents();
+  render();
+}
+
+function createDefaultState() {
+  const today = todayISO();
+
+  return {
+    settings: {
+      startDate: today,
+      theme: "light"
+    },
+    games: [],
+    blockedPeriods: [],
+    rules: [
+      {
+        id: createId(),
+        from: today,
+        to: "",
+        type: "daily",
+        minutes: 60
+      }
+    ]
+  };
+}
+
+function loadState() {
+  const fallback = createDefaultState();
+  const raw = localStorage.getItem(STORAGE_KEY);
+
+  if (!raw) {
+    return fallback;
+  }
+
+  try {
+    const saved = JSON.parse(raw);
+    return normalizeState(saved, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeState(value, fallback = createDefaultState()) {
+  const settings = value && value.settings ? value.settings : {};
+  const games = Array.isArray(value && value.games) ? value.games : [];
+  const rules = Array.isArray(value && value.rules) ? value.rules : [];
+  const blockedPeriods = Array.isArray(value && value.blockedPeriods) ? value.blockedPeriods : [];
+
+  return {
+    settings: {
+      startDate: isDateString(settings.startDate) ? settings.startDate : fallback.settings.startDate,
+      theme: settings.theme === "dark" ? "dark" : "light"
+    },
+    games: games
+      .map((game) => {
+        const times = normalizeGameTimes(game);
+        return {
+          id: game.id || createId(),
+          title: String(game.title || "").trim(),
+          platform: String(game.platform || "").trim(),
+          note: String(game.note || "").trim(),
+          times,
+          timeMode: normalizeTimeMode(game.timeMode)
+        };
+      })
+      .filter((game) => game.title && getGameMinutes(game) > 0),
+    blockedPeriods: blockedPeriods
+      .map((period) => {
+        const from = isDateString(period.from) ? period.from : fallback.settings.startDate;
+        const to = isDateString(period.to) ? period.to : from;
+        return {
+          id: period.id || createId(),
+          from,
+          to,
+          note: String(period.note || "").trim()
+        };
+      })
+      .filter((period) => period.from && period.to && period.to >= period.from),
+    rules: rules.length
+      ? rules
+          .map((rule) => ({
+            id: rule.id || createId(),
+            from: isDateString(rule.from) ? rule.from : fallback.settings.startDate,
+            to: isDateString(rule.to) ? rule.to : "",
+            type: rule.type === "weekly" ? "weekly" : "daily",
+            minutes: normalizeRuleMinutes(rule)
+          }))
+          .filter((rule) => rule.from && rule.minutes > 0)
+      : fallback.rules
+  };
+}
+
+function saveState(message = "저장됨") {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  elements.saveState.textContent = message;
+  window.clearTimeout(saveState.timer);
+  saveState.timer = window.setTimeout(() => {
+    elements.saveState.textContent = "저장됨";
+  }, 1800);
+}
+
+function applyTheme() {
+  const isDark = state.settings.theme === "dark";
+  document.documentElement.dataset.theme = isDark ? "dark" : "light";
+  elements.themeToggleButton.textContent = isDark ? "라이트모드" : "다크모드";
+  elements.themeToggleButton.setAttribute("aria-pressed", String(isDark));
+}
+
+function bindEvents() {
+  elements.themeToggleButton.addEventListener("click", () => {
+    state.settings.theme = state.settings.theme === "dark" ? "light" : "dark";
+    applyTheme();
+    saveState("테마 저장");
+  });
+
+  elements.startDate.addEventListener("change", () => {
+    state.settings.startDate = elements.startDate.value || todayISO();
+    saveState("시작일 저장");
+    render();
+  });
+
+  elements.gameForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveGameFromForm();
+  });
+
+  elements.cancelGameEditButton.addEventListener("click", clearGameForm);
+
+  elements.parseTextButton.addEventListener("click", () => {
+    parsedBulkGames = parseBulkText(elements.bulkText.value);
+    renderImportPreview();
+  });
+
+  elements.importTextButton.addEventListener("click", () => {
+    if (!parsedBulkGames.length) {
+      parsedBulkGames = parseBulkText(elements.bulkText.value);
+    }
+
+    if (!parsedBulkGames.length) {
+      renderImportPreview();
+      return;
+    }
+
+    state.games.push(...parsedBulkGames.map((game) => ({ ...game, id: createId() })));
+    elements.bulkText.value = "";
+    parsedBulkGames = [];
+    saveState("목록 가져옴");
+    render();
+  });
+
+  elements.ruleForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveRuleFromForm();
+  });
+
+  elements.cancelRuleEditButton.addEventListener("click", clearRuleForm);
+  elements.blockedPeriodForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveBlockedPeriodFromForm();
+  });
+  elements.cancelBlockedPeriodEditButton.addEventListener("click", clearBlockedPeriodForm);
+  elements.exportJsonButton.addEventListener("click", exportJson);
+  elements.importJsonInput.addEventListener("change", importJson);
+  elements.exportCsvButton.addEventListener("click", exportCsv);
+  elements.importCsvInput.addEventListener("change", importCsv);
+  elements.clearGamesButton.addEventListener("click", clearAllGames);
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) {
+      return;
+    }
+
+    const action = button.dataset.action;
+    const id = button.dataset.id;
+
+    if (action === "move-up") {
+      moveGame(id, -1);
+    } else if (action === "move-down") {
+      moveGame(id, 1);
+    } else if (action === "set-time-mode") {
+      setGameTimeMode(id, button.dataset.mode);
+    } else if (action === "edit-game") {
+      editGame(id);
+    } else if (action === "delete-game") {
+      deleteGame(id);
+    } else if (action === "edit-rule") {
+      editRule(id);
+    } else if (action === "delete-rule") {
+      deleteRule(id);
+    } else if (action === "edit-blocked-period") {
+      editBlockedPeriod(id);
+    } else if (action === "delete-blocked-period") {
+      deleteBlockedPeriod(id);
+    }
+  });
+}
+
+function render() {
+  applyTheme();
+  elements.startDate.value = state.settings.startDate;
+  elements.clearGamesButton.disabled = state.games.length === 0;
+
+  if (!editingRuleId && !elements.ruleFrom.value) {
+    elements.ruleFrom.value = state.settings.startDate;
+    elements.ruleHours.value = "1";
+    elements.ruleMinutes.value = "";
+  }
+
+  if (!editingBlockedPeriodId && !elements.blockedFrom.value) {
+    elements.blockedFrom.value = state.settings.startDate;
+    elements.blockedTo.value = state.settings.startDate;
+  }
+
+  renderRules();
+  renderBlockedPeriods();
+  const schedule = calculateSchedule();
+  renderSummary(schedule);
+  renderGames(schedule);
+  renderMonths(schedule);
+  renderImportPreview();
+}
+
+function saveGameFromForm() {
+  const order = readGameOrderInput();
+  const title = elements.gameTitle.value.trim();
+  const platform = elements.gamePlatform.value.trim();
+  const note = elements.gameNote.value.trim();
+  const times = readGameTimesFromForm();
+  const wasEditing = Boolean(editingGameId);
+
+  if (!title || !hasAllGameTimes(times)) {
+    window.alert("게임명과 세 가지 시간을 입력해 주세요.");
+    return;
+  }
+
+  if (editingGameId) {
+    const game = state.games.find((item) => item.id === editingGameId);
+    if (game) {
+      game.title = title;
+      game.platform = platform;
+      game.note = note;
+      game.times = times;
+      game.timeMode = normalizeTimeMode(game.timeMode);
+      moveGameToOrder(game.id, order);
+    }
+  } else {
+    insertGameAtOrder({
+      id: createId(),
+      title,
+      platform,
+      note,
+      times,
+      timeMode: DEFAULT_TIME_MODE
+    }, order);
+  }
+
+  clearGameForm();
+  saveState(wasEditing ? "게임 수정" : "게임 추가");
+  render();
+}
+
+function clearGameForm() {
+  editingGameId = null;
+  elements.gameForm.reset();
+  elements.gameOrder.value = "";
+  setGameTimeFormValues({
+    mainStory: 0,
+    mainExtra: 0,
+    completionist: 0
+  });
+  elements.gameFormTitle.textContent = "게임 추가";
+  elements.saveGameButton.textContent = "추가";
+  elements.cancelGameEditButton.hidden = true;
+}
+
+function editGame(id) {
+  const game = state.games.find((item) => item.id === id);
+  if (!game) {
+    return;
+  }
+
+  editingGameId = id;
+  elements.gameOrder.value = String(state.games.findIndex((item) => item.id === id) + 1);
+  elements.gameTitle.value = game.title;
+  elements.gamePlatform.value = game.platform;
+  elements.gameNote.value = game.note || "";
+  setGameTimeFormValues(game.times);
+  elements.gameFormTitle.textContent = "게임 수정";
+  elements.saveGameButton.textContent = "저장";
+  elements.cancelGameEditButton.hidden = false;
+  elements.gameTitle.focus();
+}
+
+function readGameOrderInput() {
+  const raw = elements.gameOrder.value.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : null;
+}
+
+function insertGameAtOrder(game, order) {
+  if (order === null) {
+    state.games.push(game);
+    return;
+  }
+
+  state.games.splice(clampOrderIndex(order, state.games.length), 0, game);
+}
+
+function moveGameToOrder(id, order) {
+  if (order === null) {
+    return;
+  }
+
+  const currentIndex = state.games.findIndex((item) => item.id === id);
+  if (currentIndex < 0) {
+    return;
+  }
+
+  const [game] = state.games.splice(currentIndex, 1);
+  state.games.splice(clampOrderIndex(order, state.games.length), 0, game);
+}
+
+function clampOrderIndex(order, length) {
+  return Math.min(Math.max(order - 1, 0), length);
+}
+
+function deleteGame(id) {
+  const game = state.games.find((item) => item.id === id);
+  if (!game) {
+    return;
+  }
+
+  if (!window.confirm(`"${game.title}"을(를) 삭제할까요?`)) {
+    return;
+  }
+
+  state.games = state.games.filter((item) => item.id !== id);
+  if (editingGameId === id) {
+    clearGameForm();
+  }
+  saveState("게임 삭제");
+  render();
+}
+
+function clearAllGames() {
+  if (!state.games.length) {
+    return;
+  }
+
+  if (!window.confirm(`게임 목록 ${state.games.length}개를 전부 삭제할까요?`)) {
+    return;
+  }
+
+  state.games = [];
+  clearGameForm();
+  saveState("전체 삭제");
+  render();
+}
+
+function moveGame(id, direction) {
+  const index = state.games.findIndex((item) => item.id === id);
+  const nextIndex = index + direction;
+
+  if (index < 0 || nextIndex < 0 || nextIndex >= state.games.length) {
+    return;
+  }
+
+  const [game] = state.games.splice(index, 1);
+  state.games.splice(nextIndex, 0, game);
+  saveState("순서 변경");
+  render();
+}
+
+function setGameTimeMode(id, mode) {
+  const game = state.games.find((item) => item.id === id);
+  if (!game) {
+    return;
+  }
+
+  const nextMode = normalizeTimeMode(mode);
+  if (game.timeMode === nextMode) {
+    return;
+  }
+
+  game.timeMode = nextMode;
+  saveState("시간 기준 변경");
+  render();
+}
+
+function saveRuleFromForm() {
+  const from = elements.ruleFrom.value;
+  const to = elements.ruleTo.value;
+  const type = elements.ruleType.value === "weekly" ? "weekly" : "daily";
+  const minutes = readTimeInputs(elements.ruleHours, elements.ruleMinutes);
+  const wasEditing = Boolean(editingRuleId);
+
+  if (!from || minutes <= 0) {
+    window.alert("규칙의 시작일과 시간을 입력해 주세요.");
+    return;
+  }
+
+  if (to && to < from) {
+    window.alert("종료일은 시작일보다 빠를 수 없습니다.");
+    return;
+  }
+
+  if (editingRuleId) {
+    const rule = state.rules.find((item) => item.id === editingRuleId);
+    if (rule) {
+      rule.from = from;
+      rule.to = to;
+      rule.type = type;
+      rule.minutes = minutes;
+    }
+  } else {
+    state.rules.push({
+      id: createId(),
+      from,
+      to,
+      type,
+      minutes
+    });
+  }
+
+  clearRuleForm();
+  saveState(wasEditing ? "규칙 수정" : "규칙 추가");
+  render();
+}
+
+function clearRuleForm() {
+  editingRuleId = null;
+  elements.ruleForm.reset();
+  elements.ruleFrom.value = state.settings.startDate;
+  elements.ruleHours.value = "1";
+  elements.ruleMinutes.value = "";
+  elements.ruleType.value = "daily";
+  elements.ruleFormTitle.textContent = "플레이 시간 규칙";
+  elements.saveRuleButton.textContent = "규칙 추가";
+  elements.cancelRuleEditButton.hidden = true;
+}
+
+function editRule(id) {
+  const rule = state.rules.find((item) => item.id === id);
+  if (!rule) {
+    return;
+  }
+
+  editingRuleId = id;
+  elements.ruleFrom.value = rule.from;
+  elements.ruleTo.value = rule.to || "";
+  elements.ruleType.value = rule.type;
+  setDurationInputs(elements.ruleHours, elements.ruleMinutes, rule.minutes);
+  elements.ruleFormTitle.textContent = "규칙 수정";
+  elements.saveRuleButton.textContent = "저장";
+  elements.cancelRuleEditButton.hidden = false;
+  elements.ruleFrom.focus();
+}
+
+function deleteRule(id) {
+  const rule = state.rules.find((item) => item.id === id);
+  if (!rule) {
+    return;
+  }
+
+  if (!window.confirm("이 플레이 시간 규칙을 삭제할까요?")) {
+    return;
+  }
+
+  state.rules = state.rules.filter((item) => item.id !== id);
+  if (editingRuleId === id) {
+    clearRuleForm();
+  }
+  saveState("규칙 삭제");
+  render();
+}
+
+function renderRules() {
+  if (!state.rules.length) {
+    elements.ruleList.innerHTML = `<div class="empty-state" style="display:block">규칙이 없습니다.</div>`;
+    return;
+  }
+
+  elements.ruleList.innerHTML = state.rules
+    .map((rule, index) => {
+      const range = `${rule.from} - ${rule.to || "계속"}`;
+      const typeLabel = rule.type === "weekly" ? "매주" : "매일";
+
+      return `
+        <div class="rule-item">
+          <div class="rule-main">
+            <strong>${escapeHtml(range)}</strong>
+            <span>${index + 1}. ${typeLabel} ${formatDuration(rule.minutes)}</span>
+          </div>
+          <div class="action-buttons">
+            <button class="icon-button" type="button" data-action="edit-rule" data-id="${rule.id}" title="수정" aria-label="규칙 수정">✎</button>
+            <button class="icon-button danger" type="button" data-action="delete-rule" data-id="${rule.id}" title="삭제" aria-label="규칙 삭제">×</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function saveBlockedPeriodFromForm() {
+  const from = elements.blockedFrom.value;
+  const to = elements.blockedTo.value;
+  const note = elements.blockedNote.value.trim();
+  const wasEditing = Boolean(editingBlockedPeriodId);
+
+  if (!from || !to) {
+    window.alert("플레이 불가 기간의 시작일과 종료일을 입력해 주세요.");
+    return;
+  }
+
+  if (to < from) {
+    window.alert("종료일은 시작일보다 빠를 수 없습니다.");
+    return;
+  }
+
+  if (editingBlockedPeriodId) {
+    const period = state.blockedPeriods.find((item) => item.id === editingBlockedPeriodId);
+    if (period) {
+      period.from = from;
+      period.to = to;
+      period.note = note;
+    }
+  } else {
+    state.blockedPeriods.push({
+      id: createId(),
+      from,
+      to,
+      note
+    });
+  }
+
+  clearBlockedPeriodForm();
+  saveState(wasEditing ? "불가 기간 수정" : "불가 기간 추가");
+  render();
+}
+
+function clearBlockedPeriodForm() {
+  editingBlockedPeriodId = null;
+  elements.blockedPeriodForm.reset();
+  elements.blockedFrom.value = state.settings.startDate;
+  elements.blockedTo.value = state.settings.startDate;
+  elements.blockedPeriodFormTitle.textContent = "플레이 불가 기간";
+  elements.saveBlockedPeriodButton.textContent = "기간 추가";
+  elements.cancelBlockedPeriodEditButton.hidden = true;
+}
+
+function editBlockedPeriod(id) {
+  const period = state.blockedPeriods.find((item) => item.id === id);
+  if (!period) {
+    return;
+  }
+
+  editingBlockedPeriodId = id;
+  elements.blockedFrom.value = period.from;
+  elements.blockedTo.value = period.to;
+  elements.blockedNote.value = period.note || "";
+  elements.blockedPeriodFormTitle.textContent = "불가 기간 수정";
+  elements.saveBlockedPeriodButton.textContent = "저장";
+  elements.cancelBlockedPeriodEditButton.hidden = false;
+  elements.blockedFrom.focus();
+}
+
+function deleteBlockedPeriod(id) {
+  const period = state.blockedPeriods.find((item) => item.id === id);
+  if (!period) {
+    return;
+  }
+
+  if (!window.confirm("이 플레이 불가 기간을 삭제할까요?")) {
+    return;
+  }
+
+  state.blockedPeriods = state.blockedPeriods.filter((item) => item.id !== id);
+  if (editingBlockedPeriodId === id) {
+    clearBlockedPeriodForm();
+  }
+  saveState("불가 기간 삭제");
+  render();
+}
+
+function renderBlockedPeriods() {
+  if (!state.blockedPeriods.length) {
+    elements.blockedPeriodList.innerHTML = `<div class="empty-state" style="display:block">플레이 불가 기간이 없습니다.</div>`;
+    return;
+  }
+
+  elements.blockedPeriodList.innerHTML = state.blockedPeriods
+    .map((period, index) => {
+      const range = `${period.from} - ${period.to}`;
+      const note = period.note ? `<span>${escapeHtml(period.note)}</span>` : `<span>메모 없음</span>`;
+
+      return `
+        <div class="rule-item">
+          <div class="rule-main">
+            <strong>${escapeHtml(range)}</strong>
+            <span>${index + 1}. 플레이 0시간</span>
+            ${note}
+          </div>
+          <div class="action-buttons">
+            <button class="icon-button" type="button" data-action="edit-blocked-period" data-id="${period.id}" title="수정" aria-label="불가 기간 수정">✎</button>
+            <button class="icon-button danger" type="button" data-action="delete-blocked-period" data-id="${period.id}" title="삭제" aria-label="불가 기간 삭제">×</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function calculateSchedule() {
+  const totalMinutes = state.games.reduce((sum, game) => sum + getGameMinutes(game), 0);
+
+  if (!state.games.length) {
+    return {
+      totalMinutes,
+      gamePlans: [],
+      monthPlans: [],
+      finishDate: "",
+      periodDays: 0,
+      error: ""
+    };
+  }
+
+  if (!state.rules.length) {
+    return {
+      totalMinutes,
+      gamePlans: [],
+      monthPlans: [],
+      finishDate: "",
+      periodDays: 0,
+      error: "플레이 시간 규칙이 없습니다."
+    };
+  }
+
+  let date = parseDate(state.settings.startDate);
+  let dayCapacity = capacityForDate(date);
+  let guard = 0;
+  const monthMap = new Map();
+  const gamePlans = [];
+
+  for (const game of state.games) {
+    while (dayCapacity <= 0 && guard < MAX_SIMULATION_DAYS) {
+      date = addDays(date, 1);
+      dayCapacity = capacityForDate(date);
+      guard += 1;
+    }
+
+    if (guard >= MAX_SIMULATION_DAYS) {
+      return buildSimulationError(totalMinutes, gamePlans, monthMap);
+    }
+
+    const start = formatDate(date);
+    const gameMinutes = getGameMinutes(game);
+    let remaining = gameMinutes;
+    let end = start;
+
+    while (remaining > 0 && guard < MAX_SIMULATION_DAYS) {
+      if (dayCapacity <= 0) {
+        date = addDays(date, 1);
+        dayCapacity = capacityForDate(date);
+        guard += 1;
+        continue;
+      }
+
+      const used = Math.min(remaining, dayCapacity);
+      addMonthUsage(monthMap, date, game, used);
+      remaining -= used;
+      dayCapacity -= used;
+      end = formatDate(date);
+
+      if (remaining > 0 && dayCapacity <= 0) {
+        date = addDays(date, 1);
+        dayCapacity = capacityForDate(date);
+        guard += 1;
+      }
+    }
+
+    if (guard >= MAX_SIMULATION_DAYS) {
+      return buildSimulationError(totalMinutes, gamePlans, monthMap);
+    }
+
+    gamePlans.push({
+      game,
+      start,
+      end,
+      minutes: gameMinutes
+    });
+  }
+
+  const monthPlans = Array.from(monthMap.entries()).map(([month, usage]) => ({
+    month,
+    games: Array.from(usage.values())
+  }));
+
+  const finishDate = gamePlans.length ? gamePlans[gamePlans.length - 1].end : "";
+  const periodDays = finishDate ? daysBetween(state.settings.startDate, finishDate) + 1 : 0;
+
+  return {
+    totalMinutes,
+    gamePlans,
+    monthPlans,
+    finishDate,
+    periodDays,
+    error: ""
+  };
+}
+
+function buildSimulationError(totalMinutes, gamePlans, monthMap) {
+  return {
+    totalMinutes,
+    gamePlans,
+    monthPlans: Array.from(monthMap.entries()).map(([month, usage]) => ({
+      month,
+      games: Array.from(usage.values())
+    })),
+    finishDate: "",
+    periodDays: 0,
+    error: "200년 안에 완료되지 않습니다."
+  };
+}
+
+function capacityForDate(date) {
+  const iso = formatDate(date);
+  let active = null;
+
+  if (isBlockedDate(iso)) {
+    return 0;
+  }
+
+  for (const rule of state.rules) {
+    if (rule.from <= iso && (!rule.to || iso <= rule.to)) {
+      active = rule;
+    }
+  }
+
+  if (!active) {
+    return 0;
+  }
+
+  return active.type === "weekly" ? active.minutes / 7 : active.minutes;
+}
+
+function isBlockedDate(isoDate) {
+  return state.blockedPeriods.some((period) => period.from <= isoDate && isoDate <= period.to);
+}
+
+function addMonthUsage(monthMap, date, game, minutes) {
+  const key = monthKey(date);
+
+  if (!monthMap.has(key)) {
+    monthMap.set(key, new Map());
+  }
+
+  const games = monthMap.get(key);
+  const current = games.get(game.id) || {
+    id: game.id,
+    title: game.title,
+    platform: game.platform,
+    minutes: 0
+  };
+
+  current.minutes += minutes;
+  games.set(game.id, current);
+}
+
+function renderSummary(schedule) {
+  elements.gameCount.textContent = `${state.games.length}개`;
+  elements.totalTime.textContent = formatDuration(schedule.totalMinutes);
+  elements.finishDate.textContent = schedule.error ? "계산 불가" : schedule.finishDate || "-";
+  elements.totalPeriod.textContent = schedule.error ? schedule.error : formatPeriod(schedule.periodDays);
+}
+
+function shouldShowPlatform(platform) {
+  const text = String(platform || "").trim();
+  return Boolean(text) && text.toLowerCase() !== "steam";
+}
+
+function renderGames(schedule) {
+  const planById = new Map(schedule.gamePlans.map((plan) => [plan.game.id, plan]));
+  elements.emptyGames.style.display = state.games.length ? "none" : "block";
+
+  elements.gamesTableBody.innerHTML = state.games
+    .map((game, index) => {
+      const plan = planById.get(game.id);
+      const scheduleText = plan ? `${plan.start} - ${plan.end}` : "-";
+      const platform = shouldShowPlatform(game.platform) ? `<div class="game-sub">${escapeHtml(game.platform)}</div>` : "";
+      const note = game.note ? `<div class="game-note">${escapeHtml(game.note)}</div>` : "";
+      const selectedMinutes = getGameMinutes(game);
+      const timeButtons = TIME_MODES
+        .map((mode) => {
+          const active = game.timeMode === mode.key ? " is-active" : "";
+          const pressed = game.timeMode === mode.key ? "true" : "false";
+          return `<button class="time-mode-button${active}" type="button" data-action="set-time-mode" data-id="${game.id}" data-mode="${mode.key}" title="${mode.label}" aria-label="${escapeHtml(mode.label)} 시간 기준 선택" aria-pressed="${pressed}">${mode.shortLabel}</button>`;
+        })
+        .join("");
+
+      return `
+        <tr>
+          <td><span class="badge">${index + 1}</span></td>
+          <td>
+            <div class="game-title">${escapeHtml(game.title)}</div>
+            ${platform}
+            ${note}
+          </td>
+          <td>
+            <div class="time-cell">
+              <div class="time-mode-buttons" role="group" aria-label="${escapeHtml(game.title)} 시간 기준">
+                ${timeButtons}
+              </div>
+              <span class="time-value">${formatDuration(selectedMinutes)}</span>
+            </div>
+          </td>
+          <td><span>${escapeHtml(scheduleText)}</span></td>
+          <td>
+            <div class="action-buttons">
+              <button class="icon-button" type="button" data-action="move-up" data-id="${game.id}" title="위로" aria-label="위로 이동" ${index === 0 ? "disabled" : ""}>↑</button>
+              <button class="icon-button" type="button" data-action="move-down" data-id="${game.id}" title="아래로" aria-label="아래로 이동" ${index === state.games.length - 1 ? "disabled" : ""}>↓</button>
+              <button class="icon-button" type="button" data-action="edit-game" data-id="${game.id}" title="수정" aria-label="게임 수정">✎</button>
+              <button class="icon-button danger" type="button" data-action="delete-game" data-id="${game.id}" title="삭제" aria-label="게임 삭제">×</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderMonths(schedule) {
+  elements.emptyMonths.style.display = schedule.monthPlans.length ? "none" : "block";
+
+  elements.monthsTableBody.innerHTML = schedule.monthPlans
+    .map((plan) => {
+      const monthTotal = plan.games.reduce((sum, game) => sum + game.minutes, 0);
+      const gameLines = plan.games
+        .map((game) => `
+          <div class="month-game-title">${escapeHtml(game.title)}</div>
+        `)
+        .join("");
+      const timeLines = plan.games
+        .map((game) => `
+          <div class="month-game-time">${formatDuration(game.minutes)}</div>
+        `)
+        .join("");
+
+      return `
+        <tr>
+          <td><strong>${escapeHtml(formatMonthLabel(plan.month))}</strong></td>
+          <td><div class="month-games">${gameLines}</div></td>
+          <td><div class="month-times">${timeLines}</div></td>
+          <td>${formatDuration(monthTotal)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function parseBulkText(text) {
+  const parsed = [];
+  const errors = [];
+
+  text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .forEach((line, index) => {
+      if (!line) {
+        return;
+      }
+
+      const lineResult = parseGameLine(line);
+      if (lineResult.title && hasAllGameTimes(lineResult.times)) {
+        parsed.push(lineResult);
+        return;
+      }
+
+      errors.push(`${index + 1}번째 줄을 읽을 수 없습니다.`);
+    });
+
+  parseBulkText.errors = errors;
+  return parsed;
+}
+
+function parseGameLine(line) {
+  const parts = line.includes("\t")
+    ? line.split(/\t+/).map((part) => part.trim()).filter(Boolean)
+    : line.split(/\s{2,}/).map((part) => part.trim()).filter(Boolean);
+
+  if (parts.length < 5) {
+    return {
+      title: "",
+      platform: "",
+      note: "",
+      times: emptyGameTimes(),
+      timeMode: DEFAULT_TIME_MODE
+    };
+  }
+
+  const completionistText = parts[parts.length - 1];
+  const mainExtraText = parts[parts.length - 2];
+  const mainStoryText = parts[parts.length - 3];
+  const platform = parts[parts.length - 4];
+  const title = parts.slice(0, -4).join(" ").trim();
+  const times = {
+    mainStory: parseKoreanDuration(mainStoryText),
+    mainExtra: parseKoreanDuration(mainExtraText),
+    completionist: parseKoreanDuration(completionistText)
+  };
+
+  if (!title || !platform || !hasAllGameTimes(times)) {
+    return {
+      title: "",
+      platform: "",
+      note: "",
+      times: emptyGameTimes(),
+      timeMode: DEFAULT_TIME_MODE
+    };
+  }
+
+  return {
+    title,
+    platform,
+    note: "",
+    times,
+    timeMode: DEFAULT_TIME_MODE
+  };
+}
+
+function parseKoreanDuration(value) {
+  const text = String(value || "").trim();
+  const hourMatch = text.match(/(\d+(?:[.,]\d+)?)\s*시간/);
+  const minuteMatch = text.match(/(\d+)\s*분/);
+  const hours = hourMatch ? Number(hourMatch[1].replace(",", ".")) : 0;
+  const minutes = minuteMatch ? Number(minuteMatch[1]) : 0;
+
+  if (!hourMatch && !minuteMatch) {
+    return 0;
+  }
+
+  return normalizeMinutes(hours * 60 + minutes);
+}
+
+function renderImportPreview() {
+  const errors = parseBulkText.errors || [];
+
+  if (!elements.bulkText.value.trim() && !parsedBulkGames.length) {
+    elements.importPreview.textContent = "텍스트를 붙여넣으면 미리보기가 표시됩니다.";
+    elements.importTextButton.disabled = true;
+    return;
+  }
+
+  if (!parsedBulkGames.length) {
+    elements.importPreview.innerHTML = errors.length
+      ? `<span class="warning">${escapeHtml(errors[0])}</span>`
+      : "읽을 수 있는 게임이 없습니다.";
+    elements.importTextButton.disabled = true;
+    return;
+  }
+
+  const total = parsedBulkGames.reduce((sum, game) => sum + getGameMinutes(game), 0);
+  const shown = parsedBulkGames.slice(0, 6);
+  const extra = parsedBulkGames.length > shown.length ? `<li><span>외 ${parsedBulkGames.length - shown.length}개</span><strong></strong></li>` : "";
+  const warning = errors.length ? `<div class="warning">${escapeHtml(errors[0])}</div>` : "";
+
+  elements.importPreview.innerHTML = `
+    <strong>${parsedBulkGames.length}개 / ${formatDuration(total)}</strong>
+    ${warning}
+    <ul class="preview-list">
+      ${shown
+        .map((game) => `<li><span>${escapeHtml(game.title)} <span class="preview-platform">· ${escapeHtml(game.platform)}</span></span><strong>${formatDuration(getGameMinutes(game))}</strong></li>`)
+        .join("")}
+      ${extra}
+    </ul>
+  `;
+  elements.importTextButton.disabled = false;
+}
+
+function emptyGameTimes() {
+  return {
+    mainStory: 0,
+    mainExtra: 0,
+    completionist: 0
+  };
+}
+
+function normalizeGameTimes(game = {}) {
+  const source = game.times && typeof game.times === "object" ? game.times : {};
+  const fallback = normalizeMinutes(game.totalMinutes ?? Number(game.hours || 0) * 60 + Number(game.minutes || 0));
+
+  return {
+    mainStory: normalizeMinutes(source.mainStory ?? game.mainStoryMinutes ?? game.main_story ?? fallback),
+    mainExtra: normalizeMinutes(source.mainExtra ?? game.mainExtraMinutes ?? game.main_extra ?? fallback),
+    completionist: normalizeMinutes(source.completionist ?? game.completionistMinutes ?? fallback)
+  };
+}
+
+function hasAllGameTimes(times) {
+  return TIME_MODES.every((mode) => normalizeMinutes(times && times[mode.key]) > 0);
+}
+
+function normalizeTimeMode(value) {
+  const compact = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_+\-]/g, "");
+
+  if (compact === "m" || compact === "mainstory") {
+    return "mainStory";
+  }
+
+  if (compact === "me" || compact === "mainextra") {
+    return "mainExtra";
+  }
+
+  if (compact === "c" || compact === "completionist") {
+    return "completionist";
+  }
+
+  return DEFAULT_TIME_MODE;
+}
+
+function getGameMinutes(game) {
+  const times = game && game.times ? game.times : emptyGameTimes();
+  const mode = normalizeTimeMode(game && game.timeMode);
+  return normalizeMinutes(times[mode] ?? times[DEFAULT_TIME_MODE]);
+}
+
+function readGameTimesFromForm() {
+  return {
+    mainStory: readTimeInputs(elements.gameMainStoryHours, elements.gameMainStoryMinutes),
+    mainExtra: readTimeInputs(elements.gameMainExtraHours, elements.gameMainExtraMinutes),
+    completionist: readTimeInputs(elements.gameCompletionistHours, elements.gameCompletionistMinutes)
+  };
+}
+
+function setGameTimeFormValues(times) {
+  setDurationInputs(elements.gameMainStoryHours, elements.gameMainStoryMinutes, times.mainStory);
+  setDurationInputs(elements.gameMainExtraHours, elements.gameMainExtraMinutes, times.mainExtra);
+  setDurationInputs(elements.gameCompletionistHours, elements.gameCompletionistMinutes, times.completionist);
+}
+
+function setDurationInputs(hoursInput, minutesInput, totalMinutes) {
+  const minutes = normalizeMinutes(totalMinutes);
+  hoursInput.value = minutes ? String(Math.floor(minutes / 60)) : "";
+  minutesInput.value = minutes % 60 ? String(minutes % 60) : "";
+}
+
+function readTimeInputs(hoursInput, minutesInput) {
+  const hours = Math.max(0, Number(hoursInput.value || 0));
+  const minutes = Math.max(0, Number(minutesInput.value || 0));
+  return normalizeMinutes(hours * 60 + minutes);
+}
+
+function normalizeMinutes(value) {
+  return Math.max(0, Math.round(Number(value || 0)));
+}
+
+function normalizeRuleMinutes(rule = {}) {
+  if (rule.minutes !== undefined) {
+    return normalizeMinutes(rule.minutes);
+  }
+
+  return normalizeMinutes(Number(rule.hours || 0) * 60);
+}
+
+function exportJson() {
+  downloadFile("game-backlog-planner.json", JSON.stringify(state, null, 2), "application/json");
+}
+
+async function importJson(event) {
+  const file = event.target.files[0];
+  if (!file) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    state = normalizeState(JSON.parse(text));
+    clearGameForm();
+    clearRuleForm();
+    clearBlockedPeriodForm();
+    saveState("JSON 가져옴");
+    render();
+  } catch {
+    window.alert("JSON 파일을 읽을 수 없습니다.");
+  } finally {
+    event.target.value = "";
+  }
+}
+
+function exportCsv() {
+  const rows = [["title", "platform", "main_story", "main_extra", "completionist", "time_mode", "note"]];
+
+  for (const game of state.games) {
+    rows.push([
+      game.title,
+      game.platform,
+      formatDuration(game.times.mainStory),
+      formatDuration(game.times.mainExtra),
+      formatDuration(game.times.completionist),
+      game.timeMode,
+      game.note || ""
+    ]);
+  }
+
+  downloadFile("game-backlog-games.csv", rows.map((row) => row.map(csvEscape).join(",")).join("\n"), "text/csv");
+}
+
+async function importCsv(event) {
+  const file = event.target.files[0];
+  if (!file) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    const games = parseCsvGames(text);
+    if (!games.length) {
+      window.alert("CSV에서 게임을 찾지 못했습니다.");
+      return;
+    }
+    state.games.push(...games);
+    saveState("CSV 가져옴");
+    render();
+  } catch {
+    window.alert("CSV 파일을 읽을 수 없습니다.");
+  } finally {
+    event.target.value = "";
+  }
+}
+
+function parseCsvGames(text) {
+  const rows = parseCsvRows(text).filter((row) => row.some((cell) => cell.trim()));
+  if (!rows.length) {
+    return [];
+  }
+
+  const header = rows[0].map((cell) => cell.trim().toLowerCase());
+  const hasHeader = header.includes("title") || header.includes("main_story") || header.includes("main_extra");
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  const titleIndex = hasHeader ? header.indexOf("title") : 0;
+  const platformIndex = hasHeader ? header.indexOf("platform") : 1;
+  const mainStoryIndex = hasHeader ? findHeaderIndex(header, ["main_story", "main story", "mainstory"]) : 2;
+  const mainExtraIndex = hasHeader ? findHeaderIndex(header, ["main_extra", "main + extra", "main+extra", "mainextra"]) : 3;
+  const completionistIndex = hasHeader ? findHeaderIndex(header, ["completionist"]) : 4;
+  const timeModeIndex = hasHeader ? findHeaderIndex(header, ["time_mode", "selected_time", "selected"]) : -1;
+  const noteIndex = hasHeader ? header.indexOf("note") : 5;
+
+  return dataRows
+    .map((row) => {
+      const title = String(row[titleIndex] || "").trim();
+      const platform = platformIndex >= 0 ? String(row[platformIndex] || "").trim() : "";
+      const note = noteIndex >= 0 ? String(row[noteIndex] || "").trim() : "";
+      const times = {
+        mainStory: parseDurationCell(row[mainStoryIndex]),
+        mainExtra: parseDurationCell(row[mainExtraIndex]),
+        completionist: parseDurationCell(row[completionistIndex])
+      };
+
+      return {
+        id: createId(),
+        title,
+        platform,
+        note,
+        times,
+        timeMode: normalizeTimeMode(timeModeIndex >= 0 ? row[timeModeIndex] : DEFAULT_TIME_MODE)
+      };
+    })
+    .filter((game) => game.title && hasAllGameTimes(game.times));
+}
+
+function findHeaderIndex(header, aliases) {
+  return header.findIndex((cell) => aliases.includes(cell));
+}
+
+function parseDurationCell(value) {
+  const parsed = parseKoreanDuration(value);
+  if (parsed > 0) {
+    return parsed;
+  }
+
+  const numericHours = Number(String(value || "").trim().replace(",", "."));
+  return Number.isFinite(numericHours) && numericHours > 0 ? normalizeMinutes(numericHours * 60) : 0;
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(cell);
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") {
+        index += 1;
+      }
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell);
+  rows.push(row);
+  return rows;
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadFile(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function createId() {
+  if (window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function todayISO() {
+  return formatDate(new Date());
+}
+
+function isDateString(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function parseDate(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function monthKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function formatMonthLabel(value) {
+  const [year, month] = String(value || "").split("-");
+  const monthNumber = Number(month);
+
+  if (!year || !monthNumber) {
+    return value;
+  }
+
+  return `${year}년 ${monthNumber}월`;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function daysBetween(from, to) {
+  const start = parseDate(from);
+  const end = parseDate(to);
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Math.round((end - start) / dayMs);
+}
+
+function formatDuration(minutes) {
+  const rounded = normalizeMinutes(minutes);
+  const hours = Math.floor(rounded / 60);
+  const mins = rounded % 60;
+
+  if (hours && mins) {
+    return `${hours}시간 ${mins}분`;
+  }
+
+  if (hours) {
+    return `${hours}시간`;
+  }
+
+  return mins ? `${mins}분` : "0시간";
+}
+
+function formatPeriod(days) {
+  if (!days) {
+    return "-";
+  }
+
+  if (days < 60) {
+    return `${days}일`;
+  }
+
+  const years = Math.floor(days / 365);
+  const months = Math.floor((days % 365) / 30);
+
+  if (years <= 0) {
+    return `약 ${months}개월`;
+  }
+
+  return months ? `약 ${years}년 ${months}개월` : `약 ${years}년`;
+}
+
+function formatNumber(value) {
+  return Number(value).toLocaleString("ko-KR", {
+    maximumFractionDigits: 2
+  });
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
