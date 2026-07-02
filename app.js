@@ -1,4 +1,17 @@
 const STORAGE_KEY = "game-backlog-planner:v2";
+const DATA_FILE_NAME = "game-backlog-planner.json";
+const DROPBOX_APP_KEY = "";
+const DROPBOX_CONFIG_KEY = "game-backlog-planner:dropbox-config";
+const DROPBOX_TOKEN_KEY = "game-backlog-planner:dropbox-token";
+const DROPBOX_REMOTE_KEY = "game-backlog-planner:dropbox-remote";
+const DROPBOX_DATA_PATH = `/${DATA_FILE_NAME}`;
+const DROPBOX_OAUTH_URL = "https://www.dropbox.com/oauth2/authorize";
+const DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token";
+const DROPBOX_UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload";
+const DROPBOX_DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download";
+const DROPBOX_METADATA_URL = "https://api.dropboxapi.com/2/files/get_metadata";
+const DROPBOX_SCOPES = "files.content.read files.content.write files.metadata.read";
+const DROPBOX_AUTO_SAVE_DELAY = 900;
 const MAX_SIMULATION_DAYS = 365 * 200;
 const DEFAULT_TIME_MODE = "mainExtra";
 const TIME_MODES = [
@@ -51,6 +64,13 @@ const elements = {
   importJsonInput: document.querySelector("#importJsonInput"),
   exportCsvButton: document.querySelector("#exportCsvButton"),
   importCsvInput: document.querySelector("#importCsvInput"),
+  dropboxAppKeyField: document.querySelector("#dropboxAppKeyField"),
+  dropboxAppKey: document.querySelector("#dropboxAppKey"),
+  dropboxConnectButton: document.querySelector("#dropboxConnectButton"),
+  dropboxReloadButton: document.querySelector("#dropboxReloadButton"),
+  dropboxSaveButton: document.querySelector("#dropboxSaveButton"),
+  dropboxDisconnectButton: document.querySelector("#dropboxDisconnectButton"),
+  dropboxStatus: document.querySelector("#dropboxStatus"),
   gameCount: document.querySelector("#gameCount"),
   totalTime: document.querySelector("#totalTime"),
   finishDate: document.querySelector("#finishDate"),
@@ -67,12 +87,27 @@ let editingGameId = null;
 let editingRuleId = null;
 let editingBlockedPeriodId = null;
 let parsedBulkGames = [];
+let dropboxConfig = loadDropboxConfig();
+let dropboxToken = loadDropboxToken();
+let dropboxRemote = loadDropboxRemote();
+let dropboxSaveTimer = null;
+let dropboxSaveInFlight = false;
+let dropboxSaveAgain = false;
+let dropboxStatusMessage = "";
 
 initialize();
 
-function initialize() {
+async function initialize() {
   applyTheme();
   bindEvents();
+  setupDropboxControls();
+  render();
+  await completeDropboxOAuth();
+  renderDropboxControls();
+  if (isDropboxConnected()) {
+    await openDropboxStorage();
+  }
+  renderDropboxControls();
   render();
 }
 
@@ -165,7 +200,16 @@ function normalizeState(value, fallback = createDefaultState()) {
 }
 
 function saveState(message = "저장됨") {
+  persistLocalState();
+  queueDropboxSave();
+  setSaveStateMessage(message);
+}
+
+function persistLocalState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function setSaveStateMessage(message = "저장됨") {
   elements.saveState.textContent = message;
   window.clearTimeout(saveState.timer);
   saveState.timer = window.setTimeout(() => {
@@ -237,6 +281,11 @@ function bindEvents() {
   elements.importJsonInput.addEventListener("change", importJson);
   elements.exportCsvButton.addEventListener("click", exportCsv);
   elements.importCsvInput.addEventListener("change", importCsv);
+  elements.dropboxAppKey.addEventListener("change", saveDropboxConfigFromForm);
+  elements.dropboxConnectButton.addEventListener("click", connectDropbox);
+  elements.dropboxReloadButton.addEventListener("click", reloadFromDropbox);
+  elements.dropboxSaveButton.addEventListener("click", saveDropboxNow);
+  elements.dropboxDisconnectButton.addEventListener("click", disconnectDropbox);
   elements.clearGamesButton.addEventListener("click", clearAllGames);
 
   document.addEventListener("click", (event) => {
@@ -293,6 +342,7 @@ function render() {
   renderGames(schedule);
   renderMonths(schedule);
   renderImportPreview();
+  renderDropboxControls();
 }
 
 function saveGameFromForm() {
@@ -1144,7 +1194,7 @@ function normalizeRuleMinutes(rule = {}) {
 }
 
 function exportJson() {
-  downloadFile("game-backlog-planner.json", JSON.stringify(state, null, 2), "application/json");
+  downloadFile(DATA_FILE_NAME, JSON.stringify(state, null, 2), "application/json");
 }
 
 async function importJson(event) {
@@ -1207,6 +1257,546 @@ async function importCsv(event) {
   } finally {
     event.target.value = "";
   }
+}
+
+function loadDropboxConfig() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DROPBOX_CONFIG_KEY) || "{}");
+    return {
+      appKey: DROPBOX_APP_KEY || String(saved.appKey || "").trim()
+    };
+  } catch {
+    return { appKey: DROPBOX_APP_KEY };
+  }
+}
+
+function loadDropboxToken() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DROPBOX_TOKEN_KEY) || "{}");
+    return saved.accessToken || saved.refreshToken ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadDropboxRemote() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DROPBOX_REMOTE_KEY) || "{}");
+    return saved.rev ? { path: DROPBOX_DATA_PATH, rev: saved.rev, contentHash: saved.contentHash || "" } : null;
+  } catch {
+    return null;
+  }
+}
+
+function setupDropboxControls() {
+  elements.dropboxAppKey.value = dropboxConfig.appKey;
+  elements.dropboxAppKeyField.hidden = Boolean(DROPBOX_APP_KEY);
+  renderDropboxControls();
+}
+
+function saveDropboxConfigFromForm() {
+  if (DROPBOX_APP_KEY) {
+    dropboxConfig = { appKey: DROPBOX_APP_KEY };
+    return;
+  }
+
+  dropboxConfig = {
+    appKey: elements.dropboxAppKey.value.trim()
+  };
+  localStorage.setItem(DROPBOX_CONFIG_KEY, JSON.stringify(dropboxConfig));
+  renderDropboxControls();
+}
+
+async function connectDropbox() {
+  saveDropboxConfigFromForm();
+
+  if (window.location.protocol === "file:") {
+    window.alert("Dropbox 연결은 GitHub Pages나 로컬 서버 주소에서 사용할 수 있습니다.");
+    return;
+  }
+
+  if (!dropboxConfig.appKey) {
+    window.alert("Dropbox 앱 키를 먼저 입력해 주세요.");
+    elements.dropboxAppKey.focus();
+    return;
+  }
+
+  const verifier = createCodeVerifier();
+  const challenge = await createCodeChallenge(verifier);
+  const csrfState = createId();
+  sessionStorage.setItem("dropbox_code_verifier", verifier);
+  sessionStorage.setItem("dropbox_oauth_state", csrfState);
+
+  const params = new URLSearchParams({
+    client_id: dropboxConfig.appKey,
+    response_type: "code",
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    token_access_type: "offline",
+    redirect_uri: getRedirectUri(),
+    scope: DROPBOX_SCOPES,
+    state: csrfState
+  });
+
+  window.location.href = `${DROPBOX_OAUTH_URL}?${params.toString()}`;
+}
+
+async function completeDropboxOAuth() {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get("code");
+  const returnedState = url.searchParams.get("state");
+  const oauthError = url.searchParams.get("error_description") || url.searchParams.get("error");
+
+  if (!code && !oauthError) {
+    return;
+  }
+
+  cleanDropboxOAuthUrl(url);
+
+  if (oauthError) {
+    setDropboxStatus(`Dropbox 연결 취소: ${oauthError}`);
+    return;
+  }
+
+  const expectedState = sessionStorage.getItem("dropbox_oauth_state");
+  const verifier = sessionStorage.getItem("dropbox_code_verifier");
+
+  if (!verifier || returnedState !== expectedState) {
+    setDropboxStatus("Dropbox 연결을 확인하지 못했습니다.");
+    return;
+  }
+
+  try {
+    const body = new URLSearchParams({
+      code,
+      grant_type: "authorization_code",
+      client_id: dropboxConfig.appKey,
+      code_verifier: verifier,
+      redirect_uri: getRedirectUri()
+    });
+    const response = await fetch(DROPBOX_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+    const token = await readDropboxJsonResponse(response, "Dropbox 연결에 실패했습니다.");
+    if (!token.access_token) {
+      throw new Error("Dropbox 연결에 실패했습니다.\n응답에 접근 토큰이 없습니다.");
+    }
+
+    dropboxToken = {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token || "",
+      expiresAt: token.expires_in ? Date.now() + token.expires_in * 1000 : 0
+    };
+    localStorage.setItem(DROPBOX_TOKEN_KEY, JSON.stringify(dropboxToken));
+    setDropboxStatus("Dropbox 연결됨");
+  } catch (error) {
+    setDropboxStatus("Dropbox 연결 실패");
+    window.alert(error.message);
+  } finally {
+    sessionStorage.removeItem("dropbox_code_verifier");
+    sessionStorage.removeItem("dropbox_oauth_state");
+  }
+}
+
+function cleanDropboxOAuthUrl(url) {
+  url.searchParams.delete("code");
+  url.searchParams.delete("state");
+  url.searchParams.delete("uid");
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_description");
+  window.history.replaceState({}, document.title, url.toString());
+}
+
+async function openDropboxStorage() {
+  const token = await getDropboxAccessToken({ silent: true });
+  if (!token) {
+    return;
+  }
+
+  try {
+    setDropboxStatus("Dropbox에서 불러오는 중...");
+    const remote = await downloadDropboxState(token);
+    state = normalizeState(remote.value);
+    saveDropboxRemote(remote.metadata);
+    persistLocalState();
+    clearGameForm();
+    clearRuleForm();
+    clearBlockedPeriodForm();
+    setSaveStateMessage("Dropbox 불러옴");
+    setDropboxStatus(`Dropbox 사용 중: ${DATA_FILE_NAME}`);
+  } catch (error) {
+    if (isDropboxNotFound(error)) {
+      await createDropboxStorageFile(token);
+      return;
+    }
+
+    setDropboxStatus("Dropbox 불러오기 실패");
+    window.alert(error.message);
+  }
+}
+
+async function createDropboxStorageFile(token) {
+  try {
+    let initialState = await loadTemplateState();
+    if (hasUserContent(state) && window.confirm("현재 브라우저에 저장된 목록을 Dropbox에 저장할까요?\n취소하면 빈 계획표를 만듭니다.")) {
+      initialState = normalizeState(state);
+    }
+
+    state = normalizeState(initialState);
+    const metadata = await uploadDropboxState(token, state, "add");
+    saveDropboxRemote(metadata);
+    persistLocalState();
+    clearGameForm();
+    clearRuleForm();
+    clearBlockedPeriodForm();
+    setSaveStateMessage("Dropbox 파일 생성");
+    setDropboxStatus(`Dropbox에 새 파일 생성: ${DATA_FILE_NAME}`);
+  } catch (error) {
+    setDropboxStatus("Dropbox 파일 생성 실패");
+    window.alert(error.message);
+  }
+}
+
+async function reloadFromDropbox() {
+  if (!isDropboxConnected()) {
+    window.alert("Dropbox를 먼저 연결해 주세요.");
+    return;
+  }
+
+  if (!window.confirm("Dropbox의 데이터로 현재 화면을 다시 불러올까요?")) {
+    return;
+  }
+
+  await openDropboxStorage();
+  render();
+}
+
+function disconnectDropbox() {
+  dropboxToken = null;
+  dropboxRemote = null;
+  window.clearTimeout(dropboxSaveTimer);
+  localStorage.removeItem(DROPBOX_TOKEN_KEY);
+  localStorage.removeItem(DROPBOX_REMOTE_KEY);
+  setDropboxStatus("Dropbox 연결 해제됨");
+  renderDropboxControls();
+}
+
+function queueDropboxSave() {
+  if (!isDropboxReady()) {
+    return;
+  }
+
+  window.clearTimeout(dropboxSaveTimer);
+  setDropboxStatus("Dropbox 저장 대기 중...");
+  dropboxSaveTimer = window.setTimeout(() => {
+    saveDropboxNow();
+  }, DROPBOX_AUTO_SAVE_DELAY);
+}
+
+async function saveDropboxNow() {
+  if (!isDropboxConnected()) {
+    window.alert("Dropbox를 먼저 연결해 주세요.");
+    return;
+  }
+
+  if (!isDropboxReady()) {
+    await openDropboxStorage();
+    if (!isDropboxReady()) {
+      return;
+    }
+  }
+
+  if (dropboxSaveInFlight) {
+    dropboxSaveAgain = true;
+    return;
+  }
+
+  const token = await getDropboxAccessToken();
+  if (!token) {
+    return;
+  }
+
+  window.clearTimeout(dropboxSaveTimer);
+  dropboxSaveInFlight = true;
+  dropboxSaveAgain = false;
+
+  try {
+    setDropboxStatus("Dropbox에 저장 중...");
+    const mode = dropboxRemote && dropboxRemote.rev
+      ? { ".tag": "update", update: dropboxRemote.rev }
+      : "add";
+    const metadata = await uploadDropboxState(token, state, mode);
+    saveDropboxRemote(metadata);
+    setDropboxStatus(`Dropbox 저장됨: ${DATA_FILE_NAME}`);
+    setSaveStateMessage("저장됨");
+  } catch (error) {
+    if (isDropboxConflict(error)) {
+      setDropboxStatus("Dropbox 파일이 다른 곳에서 바뀜");
+      window.alert("Dropbox 파일이 다른 곳에서 먼저 바뀌었습니다.\nDropbox에서 다시 불러온 뒤 수정해 주세요.");
+    } else {
+      setDropboxStatus("Dropbox 저장 실패");
+      window.alert(error.message);
+    }
+  } finally {
+    dropboxSaveInFlight = false;
+    if (dropboxSaveAgain) {
+      saveDropboxNow();
+    }
+  }
+}
+
+async function downloadDropboxState(token) {
+  const response = await fetch(DROPBOX_DOWNLOAD_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Dropbox-API-Arg": JSON.stringify({ path: DROPBOX_DATA_PATH })
+    }
+  });
+
+  if (!response.ok) {
+    throw await createDropboxError(response, "Dropbox에서 불러오지 못했습니다.");
+  }
+
+  const text = await response.text();
+  const metadata = readDropboxMetadataHeader(response) || await getDropboxMetadata(token);
+  return {
+    value: JSON.parse(text),
+    metadata
+  };
+}
+
+async function uploadDropboxState(token, value, mode) {
+  const response = await fetch(DROPBOX_UPLOAD_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/octet-stream",
+      "Dropbox-API-Arg": JSON.stringify({
+        path: DROPBOX_DATA_PATH,
+        mode,
+        autorename: false,
+        mute: true,
+        strict_conflict: true
+      })
+    },
+    body: JSON.stringify(value, null, 2)
+  });
+
+  return readDropboxJsonResponse(response, "Dropbox에 저장하지 못했습니다.");
+}
+
+async function getDropboxMetadata(token) {
+  const response = await fetch(DROPBOX_METADATA_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      path: DROPBOX_DATA_PATH,
+      include_deleted: false,
+      include_has_explicit_shared_members: false
+    })
+  });
+
+  if (!response.ok) {
+    throw await createDropboxError(response, "Dropbox 파일 정보를 읽지 못했습니다.");
+  }
+
+  return response.json();
+}
+
+async function getDropboxAccessToken(options = {}) {
+  if (!dropboxToken || (!dropboxToken.accessToken && !dropboxToken.refreshToken)) {
+    if (!options.silent) {
+      window.alert("Dropbox를 먼저 연결해 주세요.");
+    }
+    renderDropboxControls();
+    return "";
+  }
+
+  if (dropboxToken.accessToken && (!dropboxToken.expiresAt || Date.now() < dropboxToken.expiresAt - 60000)) {
+    return dropboxToken.accessToken;
+  }
+
+  if (!dropboxToken.refreshToken) {
+    disconnectDropbox();
+    if (!options.silent) {
+      window.alert("Dropbox 연결이 만료되었습니다. 다시 연결해 주세요.");
+    }
+    return "";
+  }
+
+  try {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: dropboxToken.refreshToken,
+      client_id: dropboxConfig.appKey
+    });
+    const response = await fetch(DROPBOX_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+    const token = await readDropboxJsonResponse(response, "Dropbox 연결 갱신에 실패했습니다.");
+    if (!token.access_token) {
+      throw new Error("Dropbox 연결 갱신에 실패했습니다.\n응답에 접근 토큰이 없습니다.");
+    }
+    dropboxToken = {
+      ...dropboxToken,
+      accessToken: token.access_token,
+      expiresAt: token.expires_in ? Date.now() + token.expires_in * 1000 : 0
+    };
+    localStorage.setItem(DROPBOX_TOKEN_KEY, JSON.stringify(dropboxToken));
+    return dropboxToken.accessToken;
+  } catch (error) {
+    disconnectDropbox();
+    if (!options.silent) {
+      window.alert(error.message);
+    }
+    return "";
+  }
+}
+
+async function loadTemplateState() {
+  try {
+    const response = await fetch(DATA_FILE_NAME, { cache: "no-store" });
+    if (response.ok) {
+      return normalizeState(await response.json());
+    }
+  } catch {
+    // If the app is opened directly from disk, use the built-in default state.
+  }
+
+  return createDefaultState();
+}
+
+function hasUserContent(value) {
+  return Boolean(
+    value.games.length ||
+      value.blockedPeriods.length ||
+      value.rules.length > 1 ||
+      value.rules.some((rule) => rule.type !== "daily" || rule.minutes !== 60 || rule.to)
+  );
+}
+
+function saveDropboxRemote(metadata) {
+  dropboxRemote = metadata && metadata.rev
+    ? {
+        path: DROPBOX_DATA_PATH,
+        rev: metadata.rev,
+        contentHash: metadata.content_hash || ""
+      }
+    : null;
+
+  if (dropboxRemote) {
+    localStorage.setItem(DROPBOX_REMOTE_KEY, JSON.stringify(dropboxRemote));
+  } else {
+    localStorage.removeItem(DROPBOX_REMOTE_KEY);
+  }
+}
+
+function isDropboxConnected() {
+  return Boolean(dropboxToken && (dropboxToken.accessToken || dropboxToken.refreshToken));
+}
+
+function isDropboxReady() {
+  return Boolean(isDropboxConnected() && dropboxRemote && dropboxRemote.rev);
+}
+
+function renderDropboxControls() {
+  const connected = isDropboxConnected();
+  const ready = isDropboxReady();
+
+  elements.dropboxAppKey.value = dropboxConfig.appKey;
+  elements.dropboxConnectButton.textContent = connected ? "Dropbox 다시 연결" : "Dropbox 연결";
+  elements.dropboxReloadButton.disabled = !connected;
+  elements.dropboxSaveButton.disabled = !ready;
+  elements.dropboxDisconnectButton.hidden = !connected;
+
+  if (!dropboxStatusMessage) {
+    setDropboxStatus(connected ? `Dropbox 연결됨: ${DATA_FILE_NAME}` : "Dropbox 미연결");
+  } else {
+    elements.dropboxStatus.textContent = dropboxStatusMessage;
+  }
+}
+
+function setDropboxStatus(message) {
+  dropboxStatusMessage = message;
+  elements.dropboxStatus.textContent = message;
+}
+
+async function readDropboxJsonResponse(response, message) {
+  if (response.ok) {
+    return response.json();
+  }
+
+  throw await createDropboxError(response, message);
+}
+
+async function createDropboxError(response, message) {
+  let detail = "";
+  let summary = "";
+
+  try {
+    detail = await response.text();
+    const parsed = JSON.parse(detail);
+    summary = parsed.error_summary || parsed.error_description || parsed.error || "";
+  } catch {
+    summary = detail || response.statusText;
+  }
+
+  const error = new Error(`${message}\n${summary || response.statusText}`);
+  error.status = response.status;
+  error.dropboxSummary = summary;
+  return error;
+}
+
+function readDropboxMetadataHeader(response) {
+  const raw = response.headers.get("Dropbox-API-Result");
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function isDropboxNotFound(error) {
+  return error.status === 409 && /not_found/.test(error.dropboxSummary || "");
+}
+
+function isDropboxConflict(error) {
+  return error.status === 409 && /conflict|malformed_path|path/.test(error.dropboxSummary || "");
+}
+
+function getRedirectUri() {
+  return window.location.origin + window.location.pathname;
+}
+
+function createCodeVerifier() {
+  const bytes = new Uint8Array(64);
+  window.crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+async function createCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await window.crypto.subtle.digest("SHA-256", data);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function base64UrlEncode(bytes) {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function parseCsvGames(text) {

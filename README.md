@@ -34,4 +34,8 @@ Enter the Gungeon	Epic	22시간 27분	61시간 51분	160시간 2분
 
 ## 저장과 백업
 
-데이터는 브라우저 저장소에 자동 저장됩니다. 다른 컴퓨터로 옮기거나 백업하려면 앱 안의 JSON 내보내기를 사용하세요. CSV 내보내기는 게임 목록만 저장합니다.
+Dropbox를 연결하면 Dropbox 안의 `game-backlog-planner.json`을 원본 데이터로 사용합니다. Dropbox 파일이 없으면 함께 배포되는 빈 `game-backlog-planner.json`을 템플릿으로 새 파일을 만듭니다.
+
+Dropbox를 연결하지 않은 상태에서는 브라우저 저장소에 임시로 자동 저장됩니다. JSON 내보내기/가져오기는 수동 백업용이고, CSV 내보내기는 게임 목록만 저장합니다.
+
+Dropbox 연결은 `file://`로 직접 연 페이지에서는 동작하지 않습니다. GitHub Pages에 올리거나 로컬 서버 주소로 열어야 합니다.
