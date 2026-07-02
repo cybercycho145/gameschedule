@@ -102,6 +102,14 @@ button:disabled {
   font-size: 14px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .save-state {
   min-width: 70px;
   padding: 7px 10px;
@@ -329,6 +337,10 @@ textarea:focus {
   border: 1px solid transparent;
   text-decoration: none;
   user-select: none;
+}
+
+.compact-button {
+  white-space: nowrap;
 }
 
 .primary-button {
@@ -677,6 +689,11 @@ tbody tr:last-child td {
   .app-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .header-actions {
+    justify-content: flex-start;
+    width: 100%;
   }
 
   .summary-band,

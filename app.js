@@ -20,7 +20,7 @@ const TIME_MODES = [
 ];
 
 const elements = {
-  saveState: document.querySelector("#saveState"),
+  headerDropboxSaveButton: document.querySelector("#headerDropboxSaveButton"),
   themeToggleButton: document.querySelector("#themeToggleButton"),
   startDate: document.querySelector("#startDate"),
   gameForm: document.querySelector("#gameForm"),
@@ -207,10 +207,10 @@ function persistLocalState() {
 }
 
 function setSaveStateMessage(message = "저장됨") {
-  elements.saveState.textContent = message;
+  document.title = message === "저장됨" ? "게임 완주 계획표" : `게임 완주 계획표 - ${message}`;
   window.clearTimeout(saveState.timer);
   saveState.timer = window.setTimeout(() => {
-    elements.saveState.textContent = "저장됨";
+    document.title = "게임 완주 계획표";
   }, 1800);
 }
 
@@ -281,6 +281,7 @@ function bindEvents() {
   elements.dropboxConnectButton.addEventListener("click", connectDropbox);
   elements.dropboxReloadButton.addEventListener("click", reloadFromDropbox);
   elements.dropboxSaveButton.addEventListener("click", saveDropboxNow);
+  elements.headerDropboxSaveButton.addEventListener("click", saveDropboxNow);
   elements.dropboxDisconnectButton.addEventListener("click", disconnectDropbox);
   elements.clearGamesButton.addEventListener("click", clearAllGames);
 
@@ -1681,6 +1682,7 @@ function renderDropboxControls() {
   elements.dropboxConnectButton.textContent = connected ? "Dropbox 다시 연결" : "Dropbox 연결";
   elements.dropboxReloadButton.disabled = !connected;
   elements.dropboxSaveButton.disabled = !ready;
+  elements.headerDropboxSaveButton.disabled = !ready;
   elements.dropboxDisconnectButton.hidden = !connected;
 
   if (!dropboxStatusMessage) {
