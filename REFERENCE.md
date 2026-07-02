@@ -92,6 +92,7 @@
   "id": "uuid",
   "title": "게임명",
   "platform": "Steam",
+  "coverUrl": "https://example.com/cover.jpg",
   "note": "",
   "times": {
     "mainStory": 120,
@@ -105,6 +106,7 @@
 ## 구현 시 유지할 점
 
 - 기존 `normalizeState` 같은 정규화 함수를 둬서 과거 JSON도 최대한 읽을 수 있게 한다.
+- 이미지 파일 자체는 저장하지 않고, 게임별 `coverUrl` 문자열만 저장한다.
 - 저장 로직은 한 곳으로 모아두고, 사용자가 수정하는 모든 흐름에서 같은 저장 함수를 거치게 한다.
 - Dropbox 연결이 되어 있으면 자동 저장하고, 연결이 없으면 localStorage에만 저장한다.
 - 화면 렌더링과 데이터 저장은 분리한다.

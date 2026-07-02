@@ -469,6 +469,35 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.game-cell {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.game-info {
+  min-width: 0;
+}
+
+.game-cover {
+  width: 120px;
+  height: 45px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  object-fit: cover;
+}
+
+.game-cover.fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 800;
+}
+
 .game-title {
   color: var(--text);
   font-size: 15px;
@@ -530,7 +559,7 @@ textarea:focus {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 680px;
+  min-width: 760px;
 }
 
 th,
@@ -711,6 +740,6 @@ tbody tr:last-child td {
   }
 
   table {
-    min-width: 620px;
+    min-width: 760px;
   }
 }

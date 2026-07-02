@@ -28,6 +28,7 @@ const elements = {
   gameOrder: document.querySelector("#gameOrder"),
   gameTitle: document.querySelector("#gameTitle"),
   gamePlatform: document.querySelector("#gamePlatform"),
+  gameCoverUrl: document.querySelector("#gameCoverUrl"),
   gameNote: document.querySelector("#gameNote"),
   gameMainStoryHours: document.querySelector("#gameMainStoryHours"),
   gameMainStoryMinutes: document.querySelector("#gameMainStoryMinutes"),
@@ -164,6 +165,7 @@ function normalizeState(value, fallback = createDefaultState()) {
           id: game.id || createId(),
           title: String(game.title || "").trim(),
           platform: String(game.platform || "").trim(),
+          coverUrl: normalizeUrl(game.coverUrl || game.cover_url || game.imageUrl || game.image_url),
           note: String(game.note || "").trim(),
           times,
           timeMode: normalizeTimeMode(game.timeMode)
@@ -346,6 +348,7 @@ function saveGameFromForm() {
   const order = readGameOrderInput();
   const title = elements.gameTitle.value.trim();
   const platform = elements.gamePlatform.value.trim();
+  const coverUrl = normalizeUrl(elements.gameCoverUrl.value);
   const note = elements.gameNote.value.trim();
   const times = readGameTimesFromForm();
   const wasEditing = Boolean(editingGameId);
@@ -360,6 +363,7 @@ function saveGameFromForm() {
     if (game) {
       game.title = title;
       game.platform = platform;
+      game.coverUrl = coverUrl;
       game.note = note;
       game.times = times;
       game.timeMode = normalizeTimeMode(game.timeMode);
@@ -370,6 +374,7 @@ function saveGameFromForm() {
       id: createId(),
       title,
       platform,
+      coverUrl,
       note,
       times,
       timeMode: DEFAULT_TIME_MODE
@@ -405,6 +410,7 @@ function editGame(id) {
   elements.gameOrder.value = String(state.games.findIndex((item) => item.id === id) + 1);
   elements.gameTitle.value = game.title;
   elements.gamePlatform.value = game.platform;
+  elements.gameCoverUrl.value = game.coverUrl || "";
   elements.gameNote.value = game.note || "";
   setGameTimeFormValues(game.times);
   elements.gameFormTitle.textContent = "게임 수정";
@@ -914,6 +920,7 @@ function renderGames(schedule) {
       const scheduleText = plan ? `${plan.start} - ${plan.end}` : "-";
       const platform = shouldShowPlatform(game.platform) ? `<div class="game-sub">${escapeHtml(game.platform)}</div>` : "";
       const note = game.note ? `<div class="game-note">${escapeHtml(game.note)}</div>` : "";
+      const cover = renderGameCover(game);
       const selectedMinutes = getGameMinutes(game);
       const timeButtons = TIME_MODES
         .map((mode) => {
@@ -927,9 +934,14 @@ function renderGames(schedule) {
         <tr>
           <td><span class="badge">${index + 1}</span></td>
           <td>
-            <div class="game-title">${escapeHtml(game.title)}</div>
-            ${platform}
-            ${note}
+            <div class="game-cell">
+              ${cover}
+              <div class="game-info">
+                <div class="game-title">${escapeHtml(game.title)}</div>
+                ${platform}
+                ${note}
+              </div>
+            </div>
           </td>
           <td>
             <div class="time-cell">
@@ -952,6 +964,18 @@ function renderGames(schedule) {
       `;
     })
     .join("");
+}
+
+function renderGameCover(game) {
+  const title = String(game.title || "").trim();
+  const fallback = escapeHtml(title.slice(0, 1) || "?");
+  const coverUrl = normalizeUrl(game.coverUrl);
+
+  if (!coverUrl) {
+    return `<div class="game-cover fallback" aria-hidden="true">${fallback}</div>`;
+  }
+
+  return `<img class="game-cover" src="${escapeHtml(coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback="${fallback}" onerror="const next=document.createElement('div');next.className='game-cover fallback';next.textContent=this.dataset.fallback||'?';this.replaceWith(next)">`;
 }
 
 function renderMonths(schedule) {
@@ -1017,6 +1041,7 @@ function parseGameLine(line) {
     return {
       title: "",
       platform: "",
+      coverUrl: "",
       note: "",
       times: emptyGameTimes(),
       timeMode: DEFAULT_TIME_MODE
@@ -1038,6 +1063,7 @@ function parseGameLine(line) {
     return {
       title: "",
       platform: "",
+      coverUrl: "",
       note: "",
       times: emptyGameTimes(),
       timeMode: DEFAULT_TIME_MODE
@@ -1047,6 +1073,7 @@ function parseGameLine(line) {
   return {
     title,
     platform,
+    coverUrl: "",
     note: "",
     times,
     timeMode: DEFAULT_TIME_MODE
@@ -1146,6 +1173,20 @@ function normalizeTimeMode(value) {
   return DEFAULT_TIME_MODE;
 }
 
+function normalizeUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  try {
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
 function getGameMinutes(game) {
   const times = game && game.times ? game.times : emptyGameTimes();
   const mode = normalizeTimeMode(game && game.timeMode);
@@ -1216,12 +1257,13 @@ async function importJson(event) {
 }
 
 function exportCsv() {
-  const rows = [["title", "platform", "main_story", "main_extra", "completionist", "time_mode", "note"]];
+  const rows = [["title", "platform", "cover_url", "main_story", "main_extra", "completionist", "time_mode", "note"]];
 
   for (const game of state.games) {
     rows.push([
       game.title,
       game.platform,
+      game.coverUrl || "",
       formatDuration(game.times.mainStory),
       formatDuration(game.times.mainExtra),
       formatDuration(game.times.completionist),
@@ -1778,6 +1820,7 @@ function parseCsvGames(text) {
   const dataRows = hasHeader ? rows.slice(1) : rows;
   const titleIndex = hasHeader ? header.indexOf("title") : 0;
   const platformIndex = hasHeader ? header.indexOf("platform") : 1;
+  const coverUrlIndex = hasHeader ? findHeaderIndex(header, ["cover_url", "cover url", "cover", "image_url", "image url", "thumbnail", "thumbnail_url"]) : -1;
   const mainStoryIndex = hasHeader ? findHeaderIndex(header, ["main_story", "main story", "mainstory"]) : 2;
   const mainExtraIndex = hasHeader ? findHeaderIndex(header, ["main_extra", "main + extra", "main+extra", "mainextra"]) : 3;
   const completionistIndex = hasHeader ? findHeaderIndex(header, ["completionist"]) : 4;
@@ -1788,6 +1831,7 @@ function parseCsvGames(text) {
     .map((row) => {
       const title = String(row[titleIndex] || "").trim();
       const platform = platformIndex >= 0 ? String(row[platformIndex] || "").trim() : "";
+      const coverUrl = coverUrlIndex >= 0 ? normalizeUrl(row[coverUrlIndex]) : "";
       const note = noteIndex >= 0 ? String(row[noteIndex] || "").trim() : "";
       const times = {
         mainStory: parseDurationCell(row[mainStoryIndex]),
@@ -1799,6 +1843,7 @@ function parseCsvGames(text) {
         id: createId(),
         title,
         platform,
+        coverUrl,
         note,
         times,
         timeMode: normalizeTimeMode(timeModeIndex >= 0 ? row[timeModeIndex] : DEFAULT_TIME_MODE)
