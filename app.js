@@ -1,7 +1,6 @@
 const STORAGE_KEY = "game-backlog-planner:v2";
 const DATA_FILE_NAME = "game-backlog-planner.json";
-const DROPBOX_APP_KEY = "";
-const DROPBOX_CONFIG_KEY = "game-backlog-planner:dropbox-config";
+const DROPBOX_APP_KEY = "86fbjrljz7vkqqa";
 const DROPBOX_TOKEN_KEY = "game-backlog-planner:dropbox-token";
 const DROPBOX_REMOTE_KEY = "game-backlog-planner:dropbox-remote";
 const DROPBOX_DATA_PATH = `/${DATA_FILE_NAME}`;
@@ -64,8 +63,6 @@ const elements = {
   importJsonInput: document.querySelector("#importJsonInput"),
   exportCsvButton: document.querySelector("#exportCsvButton"),
   importCsvInput: document.querySelector("#importCsvInput"),
-  dropboxAppKeyField: document.querySelector("#dropboxAppKeyField"),
-  dropboxAppKey: document.querySelector("#dropboxAppKey"),
   dropboxConnectButton: document.querySelector("#dropboxConnectButton"),
   dropboxReloadButton: document.querySelector("#dropboxReloadButton"),
   dropboxSaveButton: document.querySelector("#dropboxSaveButton"),
@@ -87,7 +84,7 @@ let editingGameId = null;
 let editingRuleId = null;
 let editingBlockedPeriodId = null;
 let parsedBulkGames = [];
-let dropboxConfig = loadDropboxConfig();
+const dropboxConfig = { appKey: DROPBOX_APP_KEY };
 let dropboxToken = loadDropboxToken();
 let dropboxRemote = loadDropboxRemote();
 let dropboxSaveTimer = null;
@@ -281,7 +278,6 @@ function bindEvents() {
   elements.importJsonInput.addEventListener("change", importJson);
   elements.exportCsvButton.addEventListener("click", exportCsv);
   elements.importCsvInput.addEventListener("change", importCsv);
-  elements.dropboxAppKey.addEventListener("change", saveDropboxConfigFromForm);
   elements.dropboxConnectButton.addEventListener("click", connectDropbox);
   elements.dropboxReloadButton.addEventListener("click", reloadFromDropbox);
   elements.dropboxSaveButton.addEventListener("click", saveDropboxNow);
@@ -1259,17 +1255,6 @@ async function importCsv(event) {
   }
 }
 
-function loadDropboxConfig() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(DROPBOX_CONFIG_KEY) || "{}");
-    return {
-      appKey: DROPBOX_APP_KEY || String(saved.appKey || "").trim()
-    };
-  } catch {
-    return { appKey: DROPBOX_APP_KEY };
-  }
-}
-
 function loadDropboxToken() {
   try {
     const saved = JSON.parse(localStorage.getItem(DROPBOX_TOKEN_KEY) || "{}");
@@ -1289,35 +1274,17 @@ function loadDropboxRemote() {
 }
 
 function setupDropboxControls() {
-  elements.dropboxAppKey.value = dropboxConfig.appKey;
-  elements.dropboxAppKeyField.hidden = Boolean(DROPBOX_APP_KEY);
-  renderDropboxControls();
-}
-
-function saveDropboxConfigFromForm() {
-  if (DROPBOX_APP_KEY) {
-    dropboxConfig = { appKey: DROPBOX_APP_KEY };
-    return;
-  }
-
-  dropboxConfig = {
-    appKey: elements.dropboxAppKey.value.trim()
-  };
-  localStorage.setItem(DROPBOX_CONFIG_KEY, JSON.stringify(dropboxConfig));
   renderDropboxControls();
 }
 
 async function connectDropbox() {
-  saveDropboxConfigFromForm();
-
   if (window.location.protocol === "file:") {
     window.alert("Dropbox 연결은 GitHub Pages나 로컬 서버 주소에서 사용할 수 있습니다.");
     return;
   }
 
   if (!dropboxConfig.appKey) {
-    window.alert("Dropbox 앱 키를 먼저 입력해 주세요.");
-    elements.dropboxAppKey.focus();
+    window.alert("Dropbox 앱 키가 코드에 설정되어 있지 않습니다.");
     return;
   }
 
@@ -1711,7 +1678,6 @@ function renderDropboxControls() {
   const connected = isDropboxConnected();
   const ready = isDropboxReady();
 
-  elements.dropboxAppKey.value = dropboxConfig.appKey;
   elements.dropboxConnectButton.textContent = connected ? "Dropbox 다시 연결" : "Dropbox 연결";
   elements.dropboxReloadButton.disabled = !connected;
   elements.dropboxSaveButton.disabled = !ready;
