@@ -11,6 +11,16 @@ const DROPBOX_DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download";
 const DROPBOX_METADATA_URL = "https://api.dropboxapi.com/2/files/get_metadata";
 const DROPBOX_SCOPES = "files.content.read files.content.write files.metadata.read";
 const DROPBOX_AUTO_SAVE_DELAY = 900;
+const CATALOG_FILE_NAME = "name_id_hltb.tsv";
+const STEAM_HEADER_BASE_URL = "https://cdn.akamai.steamstatic.com/steam/apps";
+const PLATFORM_COVER_URLS = {
+  epic: "assets/epic.jpg",
+  gog: "assets/gog.jpg",
+  drmfree: "assets/drmfree.jpg",
+  "두기런처": "assets/dugi.jpg",
+  "폰겜": "assets/phone.jpg",
+  "에뮬": "assets/emul.jpg"
+};
 const MAX_SIMULATION_DAYS = 365 * 200;
 const DEFAULT_TIME_MODE = "mainExtra";
 const TIME_MODES = [
@@ -38,10 +48,9 @@ const elements = {
   gameCompletionistMinutes: document.querySelector("#gameCompletionistMinutes"),
   saveGameButton: document.querySelector("#saveGameButton"),
   cancelGameEditButton: document.querySelector("#cancelGameEditButton"),
-  bulkText: document.querySelector("#bulkText"),
-  parseTextButton: document.querySelector("#parseTextButton"),
-  importTextButton: document.querySelector("#importTextButton"),
-  importPreview: document.querySelector("#importPreview"),
+  catalogSearch: document.querySelector("#catalogSearch"),
+  catalogResults: document.querySelector("#catalogResults"),
+  catalogCount: document.querySelector("#catalogCount"),
   ruleForm: document.querySelector("#ruleForm"),
   ruleFormTitle: document.querySelector("#ruleFormTitle"),
   ruleFrom: document.querySelector("#ruleFrom"),
@@ -84,7 +93,10 @@ let state = loadState();
 let editingGameId = null;
 let editingRuleId = null;
 let editingBlockedPeriodId = null;
-let parsedBulkGames = [];
+let formCatalogGameId = "";
+let gameCatalog = [];
+let catalogLoadState = "loading";
+let catalogLoadMessage = "";
 const dropboxConfig = { appKey: DROPBOX_APP_KEY };
 let dropboxToken = loadDropboxToken();
 let dropboxRemote = loadDropboxRemote();
@@ -100,6 +112,7 @@ async function initialize() {
   bindEvents();
   setupDropboxControls();
   render();
+  loadGameCatalog();
   await completeDropboxOAuth();
   renderDropboxControls();
   if (isDropboxConnected()) {
@@ -161,11 +174,14 @@ function normalizeState(value, fallback = createDefaultState()) {
     games: games
       .map((game) => {
         const times = normalizeGameTimes(game);
+        const platform = String(game.platform || "").trim();
+        const gameId = String(game.gameId || game.game_id || game.sourceId || "").trim();
         return {
           id: game.id || createId(),
           title: String(game.title || "").trim(),
-          platform: String(game.platform || "").trim(),
-          coverUrl: normalizeUrl(game.coverUrl || game.cover_url || game.imageUrl || game.image_url),
+          platform,
+          gameId,
+          coverUrl: normalizeUrl(game.coverUrl || game.cover_url || game.imageUrl || game.image_url) || createCoverUrl(platform, gameId),
           note: String(game.note || "").trim(),
           times,
           timeMode: normalizeTimeMode(game.timeMode)
@@ -243,27 +259,7 @@ function bindEvents() {
 
   elements.cancelGameEditButton.addEventListener("click", clearGameForm);
 
-  elements.parseTextButton.addEventListener("click", () => {
-    parsedBulkGames = parseBulkText(elements.bulkText.value);
-    renderImportPreview();
-  });
-
-  elements.importTextButton.addEventListener("click", () => {
-    if (!parsedBulkGames.length) {
-      parsedBulkGames = parseBulkText(elements.bulkText.value);
-    }
-
-    if (!parsedBulkGames.length) {
-      renderImportPreview();
-      return;
-    }
-
-    state.games.push(...parsedBulkGames.map((game) => ({ ...game, id: createId() })));
-    elements.bulkText.value = "";
-    parsedBulkGames = [];
-    saveState("목록 가져옴");
-    render();
-  });
+  elements.catalogSearch.addEventListener("input", renderCatalogSearch);
 
   elements.ruleForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -306,6 +302,10 @@ function bindEvents() {
       editGame(id);
     } else if (action === "delete-game") {
       deleteGame(id);
+    } else if (action === "add-catalog-game") {
+      addCatalogGame(button.dataset.catalogIndex);
+    } else if (action === "fill-catalog-game") {
+      fillGameFormFromCatalog(button.dataset.catalogIndex);
     } else if (action === "edit-rule") {
       editRule(id);
     } else if (action === "delete-rule") {
@@ -340,7 +340,7 @@ function render() {
   renderSummary(schedule);
   renderGames(schedule);
   renderMonths(schedule);
-  renderImportPreview();
+  renderCatalogSearch();
   renderDropboxControls();
 }
 
@@ -348,7 +348,7 @@ function saveGameFromForm() {
   const order = readGameOrderInput();
   const title = elements.gameTitle.value.trim();
   const platform = elements.gamePlatform.value.trim();
-  const coverUrl = normalizeUrl(elements.gameCoverUrl.value);
+  const rawCoverUrl = normalizeUrl(elements.gameCoverUrl.value);
   const note = elements.gameNote.value.trim();
   const times = readGameTimesFromForm();
   const wasEditing = Boolean(editingGameId);
@@ -363,7 +363,7 @@ function saveGameFromForm() {
     if (game) {
       game.title = title;
       game.platform = platform;
-      game.coverUrl = coverUrl;
+      game.coverUrl = rawCoverUrl || createCoverUrl(platform, game.gameId);
       game.note = note;
       game.times = times;
       game.timeMode = normalizeTimeMode(game.timeMode);
@@ -374,7 +374,8 @@ function saveGameFromForm() {
       id: createId(),
       title,
       platform,
-      coverUrl,
+      gameId: formCatalogGameId,
+      coverUrl: rawCoverUrl || createCoverUrl(platform, formCatalogGameId),
       note,
       times,
       timeMode: DEFAULT_TIME_MODE
@@ -388,6 +389,7 @@ function saveGameFromForm() {
 
 function clearGameForm() {
   editingGameId = null;
+  formCatalogGameId = "";
   elements.gameForm.reset();
   elements.gameOrder.value = "";
   setGameTimeFormValues({
@@ -407,6 +409,7 @@ function editGame(id) {
   }
 
   editingGameId = id;
+  formCatalogGameId = game.gameId || "";
   elements.gameOrder.value = String(state.games.findIndex((item) => item.id === id) + 1);
   elements.gameTitle.value = game.title;
   elements.gamePlatform.value = game.platform;
@@ -907,7 +910,7 @@ function renderSummary(schedule) {
 
 function shouldShowPlatform(platform) {
   const text = String(platform || "").trim();
-  return Boolean(text) && text.toLowerCase() !== "steam";
+  return Boolean(text) && !isSteamPlatform(text);
 }
 
 function renderGames(schedule) {
@@ -969,7 +972,7 @@ function renderGames(schedule) {
 function renderGameCover(game) {
   const title = String(game.title || "").trim();
   const fallback = escapeHtml(title.slice(0, 1) || "?");
-  const coverUrl = normalizeUrl(game.coverUrl);
+  const coverUrl = normalizeUrl(game.coverUrl) || createCoverUrl(game.platform, game.gameId);
 
   if (!coverUrl) {
     return `<div class="game-cover fallback" aria-hidden="true">${fallback}</div>`;
@@ -1007,77 +1010,230 @@ function renderMonths(schedule) {
     .join("");
 }
 
-function parseBulkText(text) {
-  const parsed = [];
-  const errors = [];
+async function loadGameCatalog() {
+  catalogLoadState = "loading";
+  catalogLoadMessage = "";
+  renderCatalogSearch();
 
-  text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .forEach((line, index) => {
-      if (!line) {
-        return;
-      }
+  try {
+    const response = await fetch(CATALOG_FILE_NAME, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
 
-      const lineResult = parseGameLine(line);
-      if (lineResult.title && hasAllGameTimes(lineResult.times)) {
-        parsed.push(lineResult);
-        return;
-      }
-
-      errors.push(`${index + 1}번째 줄을 읽을 수 없습니다.`);
-    });
-
-  parseBulkText.errors = errors;
-  return parsed;
-}
-
-function parseGameLine(line) {
-  const parts = line.includes("\t")
-    ? line.split(/\t+/).map((part) => part.trim()).filter(Boolean)
-    : line.split(/\s{2,}/).map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length < 5) {
-    return {
-      title: "",
-      platform: "",
-      coverUrl: "",
-      note: "",
-      times: emptyGameTimes(),
-      timeMode: DEFAULT_TIME_MODE
-    };
+    const text = await response.text();
+    gameCatalog = parseCatalogTsv(text);
+    catalogLoadState = gameCatalog.length ? "ready" : "error";
+    catalogLoadMessage = gameCatalog.length ? "" : "게임 목록이 비어 있습니다.";
+  } catch {
+    gameCatalog = [];
+    catalogLoadState = "error";
+    catalogLoadMessage = "게임 목록을 읽지 못했습니다. 로컬 서버나 GitHub Pages 주소에서 열어 주세요.";
   }
 
-  const completionistText = parts[parts.length - 1];
-  const mainExtraText = parts[parts.length - 2];
-  const mainStoryText = parts[parts.length - 3];
-  const platform = parts[parts.length - 4];
-  const title = parts.slice(0, -4).join(" ").trim();
-  const times = {
-    mainStory: parseKoreanDuration(mainStoryText),
-    mainExtra: parseKoreanDuration(mainExtraText),
-    completionist: parseKoreanDuration(completionistText)
-  };
+  renderCatalogSearch();
+}
 
-  if (!title || !platform || !hasAllGameTimes(times)) {
-    return {
-      title: "",
-      platform: "",
-      coverUrl: "",
-      note: "",
-      times: emptyGameTimes(),
-      timeMode: DEFAULT_TIME_MODE
-    };
+function parseCatalogTsv(text) {
+  const rows = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.split("\t"))
+    .filter((row) => row.some((cell) => String(cell || "").trim()));
+
+  return rows
+    .slice(1)
+    .map((row, index) => {
+      const title = String(row[0] || "").trim();
+      const gameId = String(row[1] || "").trim();
+      const platform = String(row[2] || "").trim();
+      const times = {
+        mainStory: parseKoreanDuration(row[3]),
+        mainExtra: parseKoreanDuration(row[4]),
+        completionist: parseKoreanDuration(row[5])
+      };
+
+      return {
+        catalogIndex: index,
+        title,
+        normalizedTitle: normalizeSearchText(title),
+        gameId,
+        platform,
+        coverUrl: createCoverUrl(platform, gameId),
+        times
+      };
+    })
+    .filter((game) => game.title && game.platform);
+}
+
+function renderCatalogSearch() {
+  if (!elements.catalogResults || !elements.catalogCount) {
+    return;
+  }
+
+  if (catalogLoadState === "loading") {
+    elements.catalogCount.textContent = "불러오는 중";
+    elements.catalogResults.textContent = "게임 목록을 불러오고 있습니다.";
+    return;
+  }
+
+  if (catalogLoadState === "error") {
+    elements.catalogCount.textContent = "오류";
+    elements.catalogResults.innerHTML = `<span class="warning">${escapeHtml(catalogLoadMessage)}</span>`;
+    return;
+  }
+
+  elements.catalogCount.textContent = `${gameCatalog.length.toLocaleString("ko-KR")}개`;
+  const query = elements.catalogSearch.value.trim();
+
+  if (!query) {
+    elements.catalogResults.textContent = "검색어를 입력하면 결과가 표시됩니다.";
+    return;
+  }
+
+  const matches = findCatalogMatches(query);
+  if (!matches.length) {
+    elements.catalogResults.textContent = "일치하는 게임이 없습니다.";
+    return;
+  }
+
+  elements.catalogResults.innerHTML = `
+    <div class="catalog-list">
+      ${matches.map(renderCatalogResult).join("")}
+    </div>
+  `;
+}
+
+function findCatalogMatches(query) {
+  const normalizedQuery = normalizeSearchText(query);
+  const tokens = normalizedQuery.split(" ").filter(Boolean);
+
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  return gameCatalog
+    .map((game) => {
+      const title = game.normalizedTitle;
+      let score = Number.POSITIVE_INFINITY;
+
+      if (title === normalizedQuery) {
+        score = 0;
+      } else if (title.startsWith(normalizedQuery)) {
+        score = 1;
+      } else if (title.includes(` ${normalizedQuery}`)) {
+        score = 2;
+      } else if (title.includes(normalizedQuery)) {
+        score = 3;
+      } else if (tokens.length > 1 && tokens.every((token) => title.includes(token))) {
+        score = 4;
+      }
+
+      return { game, score };
+    })
+    .filter((item) => Number.isFinite(item.score))
+    .sort((left, right) => left.score - right.score || left.game.title.localeCompare(right.game.title))
+    .slice(0, 12)
+    .map((item) => item.game);
+}
+
+function renderCatalogResult(game) {
+  const complete = hasAllGameTimes(game.times);
+  const action = complete ? "add-catalog-game" : "fill-catalog-game";
+  const label = complete ? "추가" : "채우기";
+  const timeText = complete ? formatDuration(game.times.mainExtra) : "시간 입력 필요";
+  const cover = renderCatalogCover(game);
+
+  return `
+    <div class="catalog-item">
+      ${cover}
+      <div class="catalog-item-main">
+        <strong>${escapeHtml(game.title)}</strong>
+        <span>${escapeHtml(game.platform)} · ${escapeHtml(timeText)}</span>
+      </div>
+      <button class="secondary-button compact-button" type="button" data-action="${action}" data-catalog-index="${game.catalogIndex}">${label}</button>
+    </div>
+  `;
+}
+
+function renderCatalogCover(game) {
+  const fallback = escapeHtml(String(game.title || "?").slice(0, 1));
+  const coverUrl = normalizeUrl(game.coverUrl);
+
+  if (!coverUrl) {
+    return `<div class="game-cover fallback" aria-hidden="true">${fallback}</div>`;
+  }
+
+  return `<img class="game-cover" src="${escapeHtml(coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback="${fallback}" onerror="const next=document.createElement('div');next.className='game-cover fallback';next.textContent=this.dataset.fallback||'?';this.replaceWith(next)">`;
+}
+
+function addCatalogGame(catalogIndex) {
+  const game = createGameFromCatalog(catalogIndex);
+  if (!game) {
+    return;
+  }
+
+  if (!hasAllGameTimes(game.times)) {
+    fillGameFormFromCatalog(catalogIndex);
+    return;
+  }
+
+  insertGameAtOrder(game, readGameOrderInput());
+  elements.catalogSearch.value = "";
+  clearGameForm();
+  saveState("카탈로그 게임 추가");
+  render();
+}
+
+function fillGameFormFromCatalog(catalogIndex) {
+  const catalogGame = getCatalogGame(catalogIndex);
+  if (!catalogGame) {
+    return;
+  }
+
+  editingGameId = null;
+  formCatalogGameId = catalogGame.gameId;
+  elements.gameTitle.value = catalogGame.title;
+  elements.gamePlatform.value = catalogGame.platform;
+  elements.gameCoverUrl.value = catalogGame.coverUrl || "";
+  elements.gameNote.value = "";
+  setGameTimeFormValues(catalogGame.times);
+  elements.gameFormTitle.textContent = hasAllGameTimes(catalogGame.times) ? "게임 추가" : "게임 추가";
+  elements.saveGameButton.textContent = "추가";
+  elements.cancelGameEditButton.hidden = false;
+  elements.gameMainStoryHours.focus();
+}
+
+function createGameFromCatalog(catalogIndex) {
+  const catalogGame = getCatalogGame(catalogIndex);
+  if (!catalogGame) {
+    return null;
   }
 
   return {
-    title,
-    platform,
-    coverUrl: "",
+    id: createId(),
+    title: catalogGame.title,
+    platform: catalogGame.platform,
+    gameId: catalogGame.gameId,
+    coverUrl: catalogGame.coverUrl,
     note: "",
-    times,
+    times: { ...catalogGame.times },
     timeMode: DEFAULT_TIME_MODE
   };
+}
+
+function getCatalogGame(catalogIndex) {
+  const index = Number(catalogIndex);
+  return Number.isInteger(index) ? gameCatalog.find((game) => game.catalogIndex === index) : null;
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function parseKoreanDuration(value) {
@@ -1092,41 +1248,6 @@ function parseKoreanDuration(value) {
   }
 
   return normalizeMinutes(hours * 60 + minutes);
-}
-
-function renderImportPreview() {
-  const errors = parseBulkText.errors || [];
-
-  if (!elements.bulkText.value.trim() && !parsedBulkGames.length) {
-    elements.importPreview.textContent = "텍스트를 붙여넣으면 미리보기가 표시됩니다.";
-    elements.importTextButton.disabled = true;
-    return;
-  }
-
-  if (!parsedBulkGames.length) {
-    elements.importPreview.innerHTML = errors.length
-      ? `<span class="warning">${escapeHtml(errors[0])}</span>`
-      : "읽을 수 있는 게임이 없습니다.";
-    elements.importTextButton.disabled = true;
-    return;
-  }
-
-  const total = parsedBulkGames.reduce((sum, game) => sum + getGameMinutes(game), 0);
-  const shown = parsedBulkGames.slice(0, 6);
-  const extra = parsedBulkGames.length > shown.length ? `<li><span>외 ${parsedBulkGames.length - shown.length}개</span><strong></strong></li>` : "";
-  const warning = errors.length ? `<div class="warning">${escapeHtml(errors[0])}</div>` : "";
-
-  elements.importPreview.innerHTML = `
-    <strong>${parsedBulkGames.length}개 / ${formatDuration(total)}</strong>
-    ${warning}
-    <ul class="preview-list">
-      ${shown
-        .map((game) => `<li><span>${escapeHtml(game.title)} <span class="preview-platform">· ${escapeHtml(game.platform)}</span></span><strong>${formatDuration(getGameMinutes(game))}</strong></li>`)
-        .join("")}
-      ${extra}
-    </ul>
-  `;
-  elements.importTextButton.disabled = false;
 }
 
 function emptyGameTimes() {
@@ -1179,12 +1300,42 @@ function normalizeUrl(value) {
     return "";
   }
 
+  if (/^\.?\/?assets\/[a-z0-9._-]+$/i.test(text)) {
+    return text.replace(/^\.?\//, "");
+  }
+
   try {
     const url = new URL(text);
     return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
   } catch {
     return "";
   }
+}
+
+function createCoverUrl(platform, gameId) {
+  const id = String(gameId || "").trim();
+
+  if (isSteamPlatform(platform) && /^\d+$/.test(id)) {
+    return `${STEAM_HEADER_BASE_URL}/${id}/header.jpg`;
+  }
+
+  return getPlatformCoverUrl(platform);
+}
+
+function getPlatformCoverUrl(platform) {
+  const key = normalizePlatformKey(platform);
+  return PLATFORM_COVER_URLS[key] || "";
+}
+
+function isSteamPlatform(platform) {
+  return normalizePlatformKey(platform).startsWith("steam");
+}
+
+function normalizePlatformKey(platform) {
+  return String(platform || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
 }
 
 function getGameMinutes(game) {
@@ -1257,11 +1408,12 @@ async function importJson(event) {
 }
 
 function exportCsv() {
-  const rows = [["title", "platform", "cover_url", "main_story", "main_extra", "completionist", "time_mode", "note"]];
+  const rows = [["title", "game_id", "platform", "cover_url", "main_story", "main_extra", "completionist", "time_mode", "note"]];
 
   for (const game of state.games) {
     rows.push([
       game.title,
+      game.gameId || "",
       game.platform,
       game.coverUrl || "",
       formatDuration(game.times.mainStory),
@@ -1819,6 +1971,7 @@ function parseCsvGames(text) {
   const hasHeader = header.includes("title") || header.includes("main_story") || header.includes("main_extra");
   const dataRows = hasHeader ? rows.slice(1) : rows;
   const titleIndex = hasHeader ? header.indexOf("title") : 0;
+  const gameIdIndex = hasHeader ? findHeaderIndex(header, ["game_id", "game id", "source_id", "source id", "steam_id", "steam id", "appid", "app_id"]) : -1;
   const platformIndex = hasHeader ? header.indexOf("platform") : 1;
   const coverUrlIndex = hasHeader ? findHeaderIndex(header, ["cover_url", "cover url", "cover", "image_url", "image url", "thumbnail", "thumbnail_url"]) : -1;
   const mainStoryIndex = hasHeader ? findHeaderIndex(header, ["main_story", "main story", "mainstory"]) : 2;
@@ -1830,6 +1983,7 @@ function parseCsvGames(text) {
   return dataRows
     .map((row) => {
       const title = String(row[titleIndex] || "").trim();
+      const gameId = gameIdIndex >= 0 ? String(row[gameIdIndex] || "").trim() : "";
       const platform = platformIndex >= 0 ? String(row[platformIndex] || "").trim() : "";
       const coverUrl = coverUrlIndex >= 0 ? normalizeUrl(row[coverUrlIndex]) : "";
       const note = noteIndex >= 0 ? String(row[noteIndex] || "").trim() : "";
@@ -1843,7 +1997,8 @@ function parseCsvGames(text) {
         id: createId(),
         title,
         platform,
-        coverUrl,
+        gameId,
+        coverUrl: coverUrl || createCoverUrl(platform, gameId),
         note,
         times,
         timeMode: normalizeTimeMode(timeModeIndex >= 0 ? row[timeModeIndex] : DEFAULT_TIME_MODE)

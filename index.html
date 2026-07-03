@@ -22,6 +22,20 @@
 
     <main class="app-shell">
       <div class="left-column">
+        <section class="panel catalog-panel">
+          <div class="section-head">
+            <h2>게임 검색</h2>
+            <span id="catalogCount" class="section-status">불러오는 중</span>
+          </div>
+          <div class="stack">
+            <label class="field">
+              <span>게임명</span>
+              <input id="catalogSearch" type="search" autocomplete="off" placeholder="예: Baldur, Persona, Chrono">
+            </label>
+            <div id="catalogResults" class="catalog-results" aria-live="polite"></div>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="section-head">
             <h2 id="gameFormTitle">게임 추가</h2>
@@ -41,10 +55,7 @@
               <span>플랫폼</span>
               <input id="gamePlatform" type="text" placeholder="PC">
             </label>
-            <label class="field">
-              <span>이미지 URL</span>
-              <input id="gameCoverUrl" type="url" autocomplete="off" placeholder="https://...">
-            </label>
+            <input id="gameCoverUrl" type="hidden">
             <div class="completion-time-grid">
               <fieldset class="duration-field">
                 <legend>Main story</legend>
@@ -174,18 +185,6 @@
             </div>
           </form>
           <div id="blockedPeriodList" class="rule-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="section-head">
-            <h2>텍스트 가져오기</h2>
-          </div>
-          <textarea id="bulkText" class="bulk-input" rows="8" spellcheck="false" placeholder="Limbo&#9;Steam&#9;3시간 34분&#9;4시간 10분&#9;6시간 44분&#10;Enter the Gungeon&#9;Epic&#9;22시간 27분&#9;61시간 51분&#9;160시간 2분"></textarea>
-          <div class="button-row panel-buttons">
-            <button id="parseTextButton" class="secondary-button" type="button">미리보기</button>
-            <button id="importTextButton" class="primary-button" type="button" disabled>가져오기</button>
-          </div>
-          <div id="importPreview" class="preview-box" aria-live="polite"></div>
         </section>
 
         <section class="panel">

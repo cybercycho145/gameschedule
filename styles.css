@@ -187,10 +187,15 @@ button:disabled {
   letter-spacing: 0;
 }
 
+.section-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .stack,
 .panel > .field,
-.bulk-input,
-.preview-box,
 .rule-list,
 .backup-grid,
 .dropbox-panel,
@@ -242,13 +247,6 @@ textarea {
   line-height: 1.45;
 }
 
-.bulk-input {
-  display: block;
-  width: calc(100% - 32px);
-  max-width: calc(100% - 32px);
-  overflow: auto;
-}
-
 input:focus,
 select:focus,
 textarea:focus {
@@ -282,6 +280,48 @@ textarea:focus {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.4;
+}
+
+.catalog-results {
+  min-height: 44px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.catalog-list {
+  display: grid;
+  gap: 8px;
+}
+
+.catalog-item {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.catalog-item-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.catalog-item-main strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.catalog-item-main span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .rule-grid > .time-grid {
@@ -406,40 +446,6 @@ textarea:focus {
   border: 0;
   opacity: 0;
   pointer-events: none;
-}
-
-.preview-box {
-  min-height: 44px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-muted);
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.preview-list {
-  display: grid;
-  gap: 6px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.preview-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 0;
-  border-top: 1px solid var(--line);
-}
-
-.preview-platform {
-  display: inline-flex;
-  margin-left: 8px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .rule-list {
@@ -741,5 +747,19 @@ tbody tr:last-child td {
 
   table {
     min-width: 760px;
+  }
+
+  .catalog-item {
+    grid-template-columns: 82px minmax(0, 1fr);
+  }
+
+  .catalog-item .game-cover {
+    width: 82px;
+    height: 42px;
+  }
+
+  .catalog-item .compact-button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }
