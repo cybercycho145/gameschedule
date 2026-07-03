@@ -30,7 +30,6 @@ const TIME_MODES = [
 ];
 
 const elements = {
-  headerDropboxSaveButton: document.querySelector("#headerDropboxSaveButton"),
   themeToggleButton: document.querySelector("#themeToggleButton"),
   startDate: document.querySelector("#startDate"),
   gameForm: document.querySelector("#gameForm"),
@@ -279,7 +278,6 @@ function bindEvents() {
   elements.dropboxConnectButton.addEventListener("click", connectDropbox);
   elements.dropboxReloadButton.addEventListener("click", reloadFromDropbox);
   elements.dropboxSaveButton.addEventListener("click", saveDropboxNow);
-  elements.headerDropboxSaveButton.addEventListener("click", saveDropboxNow);
   elements.dropboxDisconnectButton.addEventListener("click", disconnectDropbox);
   elements.clearGamesButton.addEventListener("click", clearAllGames);
 
@@ -1000,6 +998,7 @@ function renderMonths(schedule) {
 
       return `
         <tr>
+          <td><strong>${escapeHtml(formatYearLabel(plan.month))}</strong></td>
           <td><strong>${escapeHtml(formatMonthLabel(plan.month))}</strong></td>
           <td><div class="month-games">${gameLines}</div></td>
           <td><div class="month-times">${timeLines}</div></td>
@@ -1876,7 +1875,6 @@ function renderDropboxControls() {
   elements.dropboxConnectButton.textContent = connected ? "Dropbox 다시 연결" : "Dropbox 연결";
   elements.dropboxReloadButton.disabled = !connected;
   elements.dropboxSaveButton.disabled = !ready;
-  elements.headerDropboxSaveButton.disabled = !ready;
   elements.dropboxDisconnectButton.hidden = !connected;
 
   if (!dropboxStatusMessage) {
@@ -2108,7 +2106,7 @@ function monthKey(date) {
   return `${year}-${month}`;
 }
 
-function formatMonthLabel(value) {
+function formatYearLabel(value) {
   const [year, month] = String(value || "").split("-");
   const monthNumber = Number(month);
 
@@ -2116,7 +2114,18 @@ function formatMonthLabel(value) {
     return value;
   }
 
-  return `${year}년 ${monthNumber}월`;
+  return `${year}년`;
+}
+
+function formatMonthLabel(value) {
+  const [, month] = String(value || "").split("-");
+  const monthNumber = Number(month);
+
+  if (!monthNumber) {
+    return value;
+  }
+
+  return `${monthNumber}월`;
 }
 
 function addDays(date, days) {

@@ -2,8 +2,6 @@
 
 정적 파일로 실행되는 게임 일정 웹앱입니다. `name_id_hltb.tsv` 검색 기능은 브라우저의 로컬 파일 제한 때문에 로컬 서버나 GitHub Pages 주소에서 여는 것을 권장합니다.
 
-로컬에서는 `node serve-local.js`를 실행한 뒤 `http://127.0.0.1:8765/`로 열 수 있습니다.
-
 ## 게임 시간 기준
 
 게임마다 `Main story`, `Main + extra`, `Completionist` 시간을 따로 저장합니다. 일정 계산 기본값은 `Main + extra`이고, 게임 목록의 `M`, `ME`, `C` 버튼으로 게임별 계산 기준을 바꿀 수 있습니다.

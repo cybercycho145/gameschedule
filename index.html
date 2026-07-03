@@ -13,10 +13,17 @@
           <h1>게임 완주 계획표</h1>
           <button id="themeToggleButton" class="theme-toggle" type="button" aria-pressed="false">다크모드</button>
         </div>
-        <p>게임 시간 목록을 생활 리듬에 맞춰 월별 일정으로 계산합니다.</p>
       </div>
       <div class="header-actions">
-        <button id="headerDropboxSaveButton" class="primary-button compact-button" type="button" disabled>Dropbox 지금 저장</button>
+        <div class="header-dropbox">
+          <div class="button-row dropbox-actions header-dropbox-actions">
+            <button id="dropboxConnectButton" class="secondary-button compact-button" type="button">Dropbox 연결</button>
+            <button id="dropboxReloadButton" class="secondary-button compact-button" type="button" disabled>다시 불러오기</button>
+            <button id="dropboxSaveButton" class="primary-button compact-button" type="button" disabled>지금 저장</button>
+            <button id="dropboxDisconnectButton" class="ghost-button compact-button" type="button" hidden>연결 해제</button>
+          </div>
+          <div id="dropboxStatus" class="dropbox-status header-dropbox-status" aria-live="polite">Dropbox 미연결</div>
+        </div>
       </div>
     </header>
 
@@ -110,11 +117,10 @@
 
         <section class="panel">
           <div class="section-head">
-            <h2>기본 설정</h2>
+            <h2>계산 시작일</h2>
           </div>
           <label class="field">
-            <span>계산 시작일</span>
-            <input id="startDate" type="date">
+            <input id="startDate" type="date" aria-label="계산 시작일">
           </label>
         </section>
 
@@ -203,15 +209,6 @@
               <input id="importCsvInput" type="file" accept="text/csv,.csv">
             </label>
           </div>
-          <div class="dropbox-panel">
-            <div class="button-row dropbox-actions">
-              <button id="dropboxConnectButton" class="secondary-button" type="button">Dropbox 연결</button>
-              <button id="dropboxReloadButton" class="secondary-button" type="button" disabled>다시 불러오기</button>
-              <button id="dropboxSaveButton" class="primary-button" type="button" disabled>지금 저장</button>
-              <button id="dropboxDisconnectButton" class="ghost-button" type="button" hidden>연결 해제</button>
-            </div>
-            <div id="dropboxStatus" class="dropbox-status" aria-live="polite">Dropbox 미연결</div>
-          </div>
         </section>
 
       </div>
@@ -266,6 +263,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>년</th>
                   <th>월</th>
                   <th>진행</th>
                   <th>개별 플레이시간</th>
