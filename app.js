@@ -1,8 +1,9 @@
-const STORAGE_KEY = "game-backlog-planner:v2";
-const DATA_FILE_NAME = "game-backlog-planner.json";
+const APP_NAME = "roadmap";
+const STORAGE_KEY = `${APP_NAME}:v2`;
+const DATA_FILE_NAME = `${APP_NAME}.json`;
 const DROPBOX_APP_KEY = "86fbjrljz7vkqqa";
-const DROPBOX_TOKEN_KEY = "game-backlog-planner:dropbox-token";
-const DROPBOX_REMOTE_KEY = "game-backlog-planner:dropbox-remote";
+const DROPBOX_TOKEN_KEY = `${APP_NAME}:dropbox-token`;
+const DROPBOX_REMOTE_KEY = `${APP_NAME}:dropbox-remote`;
 const DROPBOX_DATA_PATH = `/${DATA_FILE_NAME}`;
 const DROPBOX_OAUTH_URL = "https://www.dropbox.com/oauth2/authorize";
 const DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token";
@@ -31,6 +32,8 @@ const TIME_MODES = [
 
 const elements = {
   themeToggleButton: document.querySelector("#themeToggleButton"),
+  toolsMenuButton: document.querySelector("#toolsMenuButton"),
+  toolsMenu: document.querySelector("#toolsMenu"),
   startDate: document.querySelector("#startDate"),
   gameForm: document.querySelector("#gameForm"),
   gameFormTitle: document.querySelector("#gameFormTitle"),
@@ -143,9 +146,56 @@ function createDefaultState() {
   };
 }
 
+function getStoredValue(key, fallbackMatcher = null, validate = null) {
+  const current = localStorage.getItem(key);
+  if (current !== null || typeof fallbackMatcher !== "function") {
+    return current;
+  }
+
+  for (const candidateKey of Object.keys(localStorage)) {
+    if (candidateKey === key || !fallbackMatcher(candidateKey)) {
+      continue;
+    }
+
+    const fallback = localStorage.getItem(candidateKey);
+    if (fallback !== null && (!validate || validate(fallback))) {
+      localStorage.setItem(key, fallback);
+      return fallback;
+    }
+  }
+
+  return null;
+}
+
+function isSavedStateKey(key) {
+  return key.endsWith(":v2");
+}
+
+function isSavedStateValue(raw) {
+  try {
+    const value = JSON.parse(raw);
+    return Boolean(value && typeof value === "object" && value.settings && Array.isArray(value.games));
+  } catch {
+    return false;
+  }
+}
+
+function isDropboxTokenKey(key) {
+  return key.endsWith(":dropbox-token");
+}
+
+function isDropboxTokenValue(raw) {
+  try {
+    const value = JSON.parse(raw);
+    return Boolean(value && typeof value === "object" && (value.accessToken || value.refreshToken));
+  } catch {
+    return false;
+  }
+}
+
 function loadState() {
   const fallback = createDefaultState();
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw = getStoredValue(STORAGE_KEY, isSavedStateKey, isSavedStateValue);
 
   if (!raw) {
     return fallback;
@@ -224,10 +274,10 @@ function persistLocalState() {
 }
 
 function setSaveStateMessage(message = "저장됨") {
-  document.title = message === "저장됨" ? "게임 완주 계획표" : `게임 완주 계획표 - ${message}`;
+  document.title = message === "저장됨" ? APP_NAME : `${APP_NAME} - ${message}`;
   window.clearTimeout(saveState.timer);
   saveState.timer = window.setTimeout(() => {
-    document.title = "게임 완주 계획표";
+    document.title = APP_NAME;
   }, 1800);
 }
 
@@ -243,6 +293,11 @@ function bindEvents() {
     state.settings.theme = state.settings.theme === "dark" ? "light" : "dark";
     applyTheme();
     saveState("테마 저장");
+  });
+
+  elements.toolsMenuButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleToolsMenu();
   });
 
   elements.startDate.addEventListener("change", () => {
@@ -282,6 +337,25 @@ function bindEvents() {
   elements.clearGamesButton.addEventListener("click", clearAllGames);
 
   document.addEventListener("click", (event) => {
+    if (elements.toolsMenu.hidden) {
+      return;
+    }
+
+    const target = event.target;
+    if (elements.toolsMenu.contains(target) || elements.toolsMenuButton.contains(target)) {
+      return;
+    }
+
+    closeToolsMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeToolsMenu();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) {
       return;
@@ -314,6 +388,18 @@ function bindEvents() {
       deleteBlockedPeriod(id);
     }
   });
+}
+
+function toggleToolsMenu(forceOpen = null) {
+  const shouldOpen = forceOpen === null ? elements.toolsMenu.hidden : forceOpen;
+  elements.toolsMenu.hidden = !shouldOpen;
+  elements.toolsMenuButton.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function closeToolsMenu() {
+  if (!elements.toolsMenu.hidden) {
+    toggleToolsMenu(false);
+  }
 }
 
 function render() {
@@ -1423,7 +1509,7 @@ function exportCsv() {
     ]);
   }
 
-  downloadFile("game-backlog-games.csv", rows.map((row) => row.map(csvEscape).join(",")).join("\n"), "text/csv");
+  downloadFile("roadmap-games.csv", rows.map((row) => row.map(csvEscape).join(",")).join("\n"), "text/csv");
 }
 
 async function importCsv(event) {
@@ -1451,7 +1537,7 @@ async function importCsv(event) {
 
 function loadDropboxToken() {
   try {
-    const saved = JSON.parse(localStorage.getItem(DROPBOX_TOKEN_KEY) || "{}");
+    const saved = JSON.parse(getStoredValue(DROPBOX_TOKEN_KEY, isDropboxTokenKey, isDropboxTokenValue) || "{}");
     return saved.accessToken || saved.refreshToken ? saved : null;
   } catch {
     return null;
@@ -1872,8 +1958,10 @@ function renderDropboxControls() {
   const connected = isDropboxConnected();
   const ready = isDropboxReady();
 
-  elements.dropboxConnectButton.textContent = connected ? "Dropbox 다시 연결" : "Dropbox 연결";
+  elements.dropboxConnectButton.textContent = connected ? "계정 변경" : "Dropbox 연결";
+  elements.dropboxReloadButton.hidden = !connected;
   elements.dropboxReloadButton.disabled = !connected;
+  elements.dropboxSaveButton.hidden = !connected;
   elements.dropboxSaveButton.disabled = !ready;
   elements.dropboxDisconnectButton.hidden = !connected;
 

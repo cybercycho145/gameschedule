@@ -3,26 +3,50 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>게임 완주 계획표</title>
+    <title>roadmap</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <header class="app-header">
-      <div>
-        <div class="title-row">
-          <h1>게임 스케쥴 계획표</h1>
-          <button id="themeToggleButton" class="theme-toggle" type="button" aria-pressed="false">다크모드</button>
-        </div>
+      <div class="title-row" aria-label="roadmap">
+        <img class="brand-logo" src="roadmap.png" alt="">
+        <h1>roadmap</h1>
       </div>
       <div class="header-actions">
-        <div class="header-dropbox">
-          <div class="button-row dropbox-actions header-dropbox-actions">
-            <button id="dropboxConnectButton" class="secondary-button compact-button" type="button">Dropbox 연결</button>
-            <button id="dropboxReloadButton" class="secondary-button compact-button" type="button" disabled>다시 불러오기</button>
-            <button id="dropboxSaveButton" class="primary-button compact-button" type="button" disabled>지금 저장</button>
-            <button id="dropboxDisconnectButton" class="ghost-button compact-button" type="button" hidden>연결 해제</button>
+        <button id="themeToggleButton" class="theme-toggle" type="button" aria-pressed="false">다크모드</button>
+        <div class="tools-menu-wrap">
+          <button id="toolsMenuButton" class="secondary-button compact-button tools-menu-button" type="button" aria-expanded="false" aria-controls="toolsMenu">관리</button>
+          <div id="toolsMenu" class="tools-menu" hidden>
+            <section class="tools-section" aria-labelledby="dropboxToolsTitle">
+              <div class="tools-section-head">
+                <h2 id="dropboxToolsTitle">Dropbox</h2>
+                <div id="dropboxStatus" class="dropbox-status" aria-live="polite">Dropbox 미연결</div>
+              </div>
+              <div class="button-row dropbox-actions tools-button-grid">
+                <button id="dropboxSaveButton" class="primary-button compact-button" type="button" disabled hidden>지금 저장</button>
+                <button id="dropboxReloadButton" class="secondary-button compact-button" type="button" disabled hidden>다시 불러오기</button>
+                <button id="dropboxDisconnectButton" class="ghost-button compact-button" type="button" hidden>연결 해제</button>
+                <button id="dropboxConnectButton" class="secondary-button compact-button" type="button">Dropbox 연결</button>
+              </div>
+            </section>
+            <section class="tools-section" aria-labelledby="backupToolsTitle">
+              <div class="tools-section-head">
+                <h2 id="backupToolsTitle">백업</h2>
+              </div>
+              <div class="backup-grid">
+                <button id="exportJsonButton" class="secondary-button" type="button">JSON 내보내기</button>
+                <label class="file-button">
+                  JSON 가져오기
+                  <input id="importJsonInput" type="file" accept="application/json,.json">
+                </label>
+                <button id="exportCsvButton" class="secondary-button" type="button">CSV 내보내기</button>
+                <label class="file-button">
+                  CSV 가져오기
+                  <input id="importCsvInput" type="file" accept="text/csv,.csv">
+                </label>
+              </div>
+            </section>
           </div>
-          <div id="dropboxStatus" class="dropbox-status header-dropbox-status" aria-live="polite">Dropbox 미연결</div>
         </div>
       </div>
     </header>
@@ -191,24 +215,6 @@
             </div>
           </form>
           <div id="blockedPeriodList" class="rule-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="section-head">
-            <h2>백업</h2>
-          </div>
-          <div class="backup-grid">
-            <button id="exportJsonButton" class="secondary-button" type="button">JSON 내보내기</button>
-            <label class="file-button">
-              JSON 가져오기
-              <input id="importJsonInput" type="file" accept="application/json,.json">
-            </label>
-            <button id="exportCsvButton" class="secondary-button" type="button">CSV 내보내기</button>
-            <label class="file-button">
-              CSV 가져오기
-              <input id="importCsvInput" type="file" accept="text/csv,.csv">
-            </label>
-          </div>
         </section>
 
       </div>
